@@ -216,3 +216,14 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+
+# UNWANTED FOLDERS
+.vscode/
+.claude/
+old_scripts/
+
+LIBERO/
+openvla/
+openvla-oft/
+mail/
