@@ -10,7 +10,7 @@ A full architectural specification is available at: `doc/ARCHITECTURE.md` (read 
 For environment setup refer to: `doc/SETUP_ENV.md` but read it only if asked.
 
 ## Package versions — Read before coding
-Exact package versiona of every environment are reported in dedicated files located at `doc/pip-lists/...`
+Exact package versions of every environment are reported in dedicated files located at `doc/pip-lists/...`
 ** Refer to that file before using specific APIs as versions are pinned for compatibility purposes**:
 
 - `pip-lists/openvla-env.pip.md`  OpenVLA base environment
