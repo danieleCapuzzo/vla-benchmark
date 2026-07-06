@@ -1,0 +1,30 @@
+{
+  "rollouts_per_task": 20,
+  "num_cameras": 1,
+  "quant": "none",
+  "seed": 7,
+  "num_steps_wait": 10,
+  "output_dir": "results",
+  "suites": {
+    "spatial": {
+      "checkpoint": "moojink/openvla-7b-oft-finetuned-libero-spatial",
+      "unnorm_key": "libero_spatial_no_noops",
+      "task_suite_name": "libero_spatial"
+    },
+    "object": {
+      "checkpoint": "moojink/openvla-7b-oft-finetuned-libero-object",
+      "unnorm_key": "libero_object_no_noops",
+      "task_suite_name": "libero_object"
+    },
+    "goal": {
+      "checkpoint": "moojink/openvla-7b-oft-finetuned-libero-goal",
+      "unnorm_key": "libero_goal_no_noops",
+      "task_suite_name": "libero_goal"
+    },
+    "long": {
+      "checkpoint": "moojink/openvla-7b-oft-finetuned-libero-10",
+      "unnorm_key": "libero_10_no_noops",
+      "task_suite_name": "libero_10"
+    }
+  }
+}
