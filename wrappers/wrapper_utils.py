@@ -125,6 +125,22 @@ def load_openvla_model(checkpoint: str, quant: str) -> Any:
     return vla
 
 
+def resize_openvla_image(image: np.ndarray, size: int) -> np.ndarray:
+    """
+    Resizes `image` to `size` x `size` via the official OpenVLA/Octo dataloader scheme:
+    JPEG encode/decode round-trip then lanczos3 resize. Verbatim port of
+    `openvla/experiments/robot/libero/libero_utils.py::resize_image` (paper-critical --
+    plain bilinear/nearest upscaling shifts the input distribution away from training).
+    """
+    import tensorflow as tf
+
+    img = tf.image.encode_jpeg(image)
+    img = tf.io.decode_image(img, expand_animations=False, dtype=tf.uint8)
+    img = tf.image.resize(img, (size, size), method="lanczos3", antialias=True)
+    img = tf.cast(tf.clip_by_value(tf.round(img), 0, 255), tf.uint8)
+    return img.numpy()
+
+
 def center_crop_and_resize(
     image: Image.Image, crop_scale: float, size: int
 ) -> Image.Image:
@@ -156,13 +172,13 @@ def prepare_openvla_inputs(
     """
     Builds the processor inputs for a single OpenVLA-family inference call.
 
-    `image` must already be rotated 180 degrees and resized to `OPENVLA_INPUT_RESOLUTION`
-    (the official lanczos3+JPEG-round-trip resize, see
-    `wrappers/openvla_wrapper.py::predict` which sources this from `openvla/`'s own
-    `get_libero_image`) -- this function only applies the 0.9-area center-crop the
-    LIBERO-finetuned checkpoints were trained with, builds the official prompt, and casts
-    `pixel_values` to bfloat16 (unquantized) or float16 (8bit/4bit) as required.
+    `image` must already be rotated 180 degrees (see `core/core_utils.py::get_libero_image`)
+    but NOT yet resized -- this function resizes it to `OPENVLA_INPUT_RESOLUTION` via the
+    official lanczos3+JPEG round-trip (`resize_openvla_image`), applies the 0.9-area
+    center-crop the LIBERO-finetuned checkpoints were trained with, builds the official
+    prompt, and casts `pixel_values` to bfloat16 (unquantized) or float16 (8bit/4bit).
     """
+    image = resize_openvla_image(image, OPENVLA_INPUT_RESOLUTION)
     pil_image = Image.fromarray(image).convert("RGB")
     pil_image = center_crop_and_resize(
         pil_image, crop_scale=0.9, size=OPENVLA_INPUT_RESOLUTION
