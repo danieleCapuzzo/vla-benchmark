@@ -156,9 +156,12 @@ def prepare_openvla_inputs(
     """
     Builds the processor inputs for a single OpenVLA-family inference call.
 
-    Center-crops to 90% area then resizes to `OPENVLA_INPUT_RESOLUTION`, builds
-    the official prompt, and casts `pixel_values` to bfloat16 (unquantized) or float16
-    (8bit/4bit) as required.
+    `image` must already be rotated 180 degrees and resized to `OPENVLA_INPUT_RESOLUTION`
+    (the official lanczos3+JPEG-round-trip resize, see
+    `wrappers/openvla_wrapper.py::predict` which sources this from `openvla/`'s own
+    `get_libero_image`) -- this function only applies the 0.9-area center-crop the
+    LIBERO-finetuned checkpoints were trained with, builds the official prompt, and casts
+    `pixel_values` to bfloat16 (unquantized) or float16 (8bit/4bit) as required.
     """
     pil_image = Image.fromarray(image).convert("RGB")
     pil_image = center_crop_and_resize(

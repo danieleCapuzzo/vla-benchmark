@@ -27,6 +27,9 @@ os.environ["GLOG_minloglevel"] = "2"
 os.environ["TRANSFORMERS_VERBOSITY"] = "error"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
+# stops tokenizer parallelism to avoid deadlock issue
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 
 def _suppress_noisy_warnings() -> None:
     """
@@ -123,6 +126,12 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Path to config JSON (default: config/config_<model>.json, auto-selected by --model)",
     )
+    parser.add_argument(
+        "--save-videos",
+        action="store_true",
+        help="Save an MP4 replay per trial to <suite_dir>/videos/ (debug aid; off by "
+        "default since it writes one file per rollout).",
+    )
     return parser.parse_args()
 
 
@@ -149,6 +158,7 @@ def run_one_suite(
     rollouts: int,
     seed: int,
     run_dir: Path,
+    save_videos: bool = False,
 ) -> Dict[str, Any]:
     """
     Runs a full evaluation for a single suite and writes its per-run result files.
@@ -165,6 +175,8 @@ def run_one_suite(
             shared by every suite in this invocation; see `main`). This suite's
             `episodes.jsonl`/`summary.csv` are written to a `{suite}_{quant}_{ncam}cam/`
             subfolder within it.
+        save_videos: If True, saves an MP4 replay per trial under
+            `<suite_dir>/videos/` (see `core.core_utils.write_rollout_video`).
 
     Returns:
         The aggregated summary row dict for this suite (as written to its `summary.csv`),
@@ -200,15 +212,17 @@ def run_one_suite(
     # `_suppress_noisy_warnings` docstring).
     _suppress_noisy_warnings()
 
+    suite_dir = run_dir / f"{suite}_{quant}_{num_cameras}cam"
+
     evaluator = LiberoEvaluator(
         task_suite_name=suite_cfg.task_suite_name,
         num_steps_wait=cfg.num_steps_wait,
+        video_dir=(suite_dir / "videos") if save_videos else None,
     )
     episodes = evaluator.run(wrapper, num_rollouts_per_task=rollouts)
 
     metadata = wrapper.get_metadata()
     vram_peak_gb = wrapper.get_vram_footprint_gb()
-    suite_dir = run_dir / f"{suite}_{quant}_{num_cameras}cam"
 
     write_episodes_jsonl(suite_dir / "episodes.jsonl", episodes)
     row = write_summary_csv(
@@ -272,6 +286,7 @@ def main() -> None:
             rollouts=rollouts,
             seed=seed,
             run_dir=run_dir,
+            save_videos=args.save_videos,
         )
         for suite in suites
     ]
