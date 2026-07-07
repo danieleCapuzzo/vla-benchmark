@@ -1,0 +1,2 @@
+model_id,suite,quant,n_cam,seed,success_rate,n_episodes,lat_mean_ms,lat_median_ms,lat_std_ms,lat_var_ms2,lat_p95_ms,lat_p99_ms,effective_aps,feedback_hz,vram_peak_gb,num_params,mean_steps_success
+oft,libero_10,8bit,2,7,0.945,200,169.67514495838282,168.32570499900612,5.920673346837138,35.054372879947685,177.27346099854913,190.53832799909287,47.14892096872648,5.89361512109081,10.465718272,7541237184,249.57142857142858
