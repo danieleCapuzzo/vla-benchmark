@@ -1,5 +1,6 @@
 # Setup Ambienti — Tesi VLA su LIBERO
-### Guida completa di ricostruzione + Provenance — RTX 5080 (Blackwell sm_120), Pop!_OS 24.04
+
+### Guida completa di ricostruzione + Provenance — RTX 5080 (Blackwell sm_120), Pop!\_OS 24.04
 
 > Documento unico e auto-contenuto. Copre: prerequisiti sistema, i due ambienti Python
 > (`.openvla-env`, `.oft-env`), LIBERO condiviso, struttura cartelle, e la provenance completa
@@ -28,6 +29,7 @@
 ```
 
 **Note sulla struttura:**
+
 - `.openvla-env` e `.oft-env` stanno in `thesis-vla/` (un livello sopra `vla-benchmark/`).
 - `LIBERO/` è clonato una sola volta e installato come editable (`pip install -e .`) in
   entrambi i venv: un solo sorgente, un solo commit da tracciare.
@@ -36,17 +38,19 @@
   repo Git separati con la loro storia, tu tieni traccia solo dei commit hash nel provenance.
 
 **VS Code `settings.json`** (in `vla-benchmark/.vscode/`, per lo scenario "apri vla-benchmark come root"):
+
 ```json
 {
-    "python.defaultInterpreterPath": "${workspaceFolder}/../.openvla-env/bin/python",
-    "python.terminal.activateEnvironment": true,
-    "editor.formatOnSave": true,
-    "files.exclude": { "**/__pycache__": true, "**/*.pyc": true },
-    "terminal.integrated.env.linux": {
-        "PATH": "${workspaceFolder}/../.openvla-env/bin:${env:PATH}"
-    }
+  "python.defaultInterpreterPath": "${workspaceFolder}/../.openvla-env/bin/python",
+  "python.terminal.activateEnvironment": true,
+  "editor.formatOnSave": true,
+  "files.exclude": { "**/__pycache__": true, "**/*.pyc": true },
+  "terminal.integrated.env.linux": {
+    "PATH": "${workspaceFolder}/../.openvla-env/bin:${env:PATH}"
+  }
 }
 ```
+
 Per lavorare su OFT, cambia i due path in `.oft-env`. In alternativa usa un multi-root
 workspace con due `.vscode/settings.json` separati (uno per `openvla/`, uno per `openvla-oft/`).
 
@@ -152,6 +156,7 @@ git rev-parse HEAD   # -> provenance
 
 pip install -e . --no-deps
 ```
+
 ⚠️ Senza `--no-deps`, pip reinstallerebbe `torch==2.2.0` (pinnato nel pyproject), rompendo Blackwell.
 
 ## III.3 Dipendenze manuali (escluso torch)
@@ -166,6 +171,7 @@ pip install "dlimp @ git+https://github.com/moojink/dlimp_openvla"
 ## III.4 Fix protobuf / tensorflow-metadata
 
 Sintomo: `ImportError: cannot import name 'runtime_version' from 'google.protobuf'`
+
 ```bash
 pip install "tensorflow-metadata==1.14.0" --force-reinstall --no-deps
 ```
@@ -173,6 +179,7 @@ pip install "tensorflow-metadata==1.14.0" --force-reinstall --no-deps
 ## III.5 Fix accelerate (per quantizzazione)
 
 Sintomo: `ValueError: .to is not supported for 4-bit or 8-bit bitsandbytes models`
+
 ```bash
 pip install "accelerate==0.30.1" "torch==2.11.0+cu128" \
     --extra-index-url https://download.pytorch.org/whl/cu128 --force-reinstall --no-deps
@@ -191,6 +198,7 @@ pip install bitsandbytes
 pip install packaging ninja
 pip install flash-attn --no-build-isolation   # compila ma fallisce a runtime
 ```
+
 Sintomo runtime: `RuntimeError: FlashAttention only supports Ampere GPUs or newer`.
 Non disinstallare, semplicemente usa sempre `attn_implementation="sdpa"` nel codice.
 
@@ -245,10 +253,12 @@ pip install accelerate>=0.25.0 draccus==0.8.0 einops huggingface_hub json-numpy 
 ## IV.4 ⚠️ Transformers — FORK OBBLIGATORIA
 
 OFT richiede una fork custom con attenzione bidirezionale per il parallel decoding.
+
 ```bash
 pip install "transformers @ git+https://github.com/moojink/transformers-openvla-oft.git"
 pip install "dlimp @ git+https://github.com/moojink/dlimp_openvla"
 ```
+
 Nel log di install cerca `Resolved ...transformers-openvla-oft.git to commit <hash>` e annota
 l'hash. Il numero di versione mostrato resta `4.40.1` (normale, è una fork di quel tag).
 
@@ -307,7 +317,8 @@ cd ~/Desktop/thesis-vla/LIBERO
 pip install -e . --no-deps
 
 # 2. robosuite DEVE essere <1.5 (LIBERO usa SingleArmEnv, rimosso in 1.5)
-pip install "robosuite<1.5"
+pip install "robosuite==1.4.1"
+pip install mujoco==3.9.0
 
 # 3. gymnasium
 pip install "gymnasium>=0.29.0"
@@ -335,6 +346,7 @@ python -c "from experiments.robot.libero.run_libero_eval import GenerateConfig; 
 python -c "import tensorflow as tf; print('TF OK:', tf.__version__)"
 python -c "import torch; print(torch.__version__, torch.cuda.get_device_capability(0))"
 ```
+
 Atteso: `LIBERO OK`, `OFT+LIBERO OK`, `TF OK: 2.15.0`, `2.11.0+cu128 (12, 0)`.
 (I check 2-3 richiedono la fork transformers + moduli OFT: passeranno pienamente solo in `.oft-env`.)
 
@@ -348,6 +360,7 @@ Stessa identica sequenza in `.oft-env` (stesso clone condiviso, install editable
 cd ~/Desktop/thesis-vla/vla-benchmark/openvla-oft
 python ../test_oft_libero.py --quant 8bit
 ```
+
 Deve dare action chunk shape `(8, 7)`, valori piccoli plausibili, VRAM picco ~8-9 GB in 8-bit.
 
 ---
@@ -358,6 +371,7 @@ Deve dare action chunk shape `(8, 7)`, valori piccoli plausibili, VRAM picco ~8-
 > di verità per i Metodi della tesi e per la riproducibilità.
 
 ## VI.1 Hardware / Sistema
+
 ```
 GPU:            NVIDIA GeForce RTX 5080, 16 GB (Blackwell, compute capability sm_120)
 VRAM reale disponibile: ~15.1 GB (16.3 GB nominali - ~1.1 GB overhead compositor COSMIC)
@@ -369,6 +383,7 @@ Python:         3.10.20 (deadsnakes PPA)
 ```
 
 ## VI.2 Versioni chiave condivise (entrambi i venv)
+
 ```
 torch:               2.11.0+cu128   (DEVIAZIONE: repo pinnano 2.2.0, incompatibile con sm_120)
 capability:          (12, 0)
@@ -383,6 +398,7 @@ bitsandbytes:        ___ (versione installata)
 ```
 
 ## VI.3 Commit hash
+
 ```
 openvla (openvla/openvla):                       c8f03f48af692657d3060c19588038c7220e9af9
 openvla-oft (moojink/openvla-oft):               e4287e94541f459edc4feabc4e181f537cd569a8
@@ -391,6 +407,7 @@ LIBERO (Lifelong-Robot-Learning/LIBERO):         8f1084e3132a39270c3a13ebe37270a
 ```
 
 ## VI.4 Checkpoint usati (HuggingFace)
+
 ```
 OpenVLA base:  openvla/openvla-7b  (unnorm_key: bridge_orig)
 OFT LIBERO:    moojink/openvla-7b-oft-finetuned-libero-spatial  (unnorm_key: libero_spatial_no_noops)
@@ -400,6 +417,7 @@ OFT LIBERO:    moojink/openvla-7b-oft-finetuned-libero-spatial  (unnorm_key: lib
 ```
 
 ## VI.5 Deviazioni dal setup ufficiale (da citare nei Metodi della tesi)
+
 ```
 1. torch 2.11.0+cu128 invece di 2.2.0
    Motivo: RTX 5080 Blackwell (sm_120) richiede CUDA >=12.8; torch 2.2.0 non ha kernel sm_120.
@@ -420,6 +438,7 @@ OFT LIBERO:    moojink/openvla-7b-oft-finetuned-libero-spatial  (unnorm_key: lib
 ```
 
 ## VI.6 Bug incontrati (riferimenti issue)
+
 ```
 - FlashAttention non supporta sm_120:         Dao-AILab/flash-attention#2361, #1665
 - nvcc segfault flash-attn per sm_120:        Dao-AILab/flash-attention#2361
@@ -465,13 +484,8 @@ Provenance:
 
 # NOTE — VRAM su desktop Linux nativo
 
-Su Pop!_OS nativo il compositor COSMIC + finestre aperte occupano ~1-1.5GB di VRAM prima di
+Su Pop!\_OS nativo il compositor COSMIC + finestre aperte occupano ~1-1.5GB di VRAM prima di
 lanciare Python. Su 16.3GB nominali il budget reale è ~15GB. Il modello bf16 (~14.2GB) rischia
 OOM. Diverso da WSL2/server headless dove la GPU non è condivisa con un compositor grafico.
 Soluzioni: (1) chiudere app grafiche, (2) quantizzazione 8/4-bit, (3) TTY con display manager
 fermato. Da citare in tesi come vincolo pratico del deployment su hardware consumer.
-
-
-
-
-  
