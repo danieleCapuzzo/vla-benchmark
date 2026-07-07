@@ -1,43 +1,49 @@
-# Setup Ambienti — Tesi VLA su LIBERO
+# Environment Setup — VLA-on-LIBERO Thesis
 
-### Guida completa di ricostruzione + Provenance — RTX 5080 (Blackwell sm_120), Pop!\_OS 24.04
+### Complete rebuild guide + provenance — RTX 5080 (Blackwell sm_120), Pop!\_OS 24.04
 
-> Documento unico e auto-contenuto. Copre: prerequisiti sistema, i due ambienti Python
-> (`.openvla-env`, `.oft-env`), LIBERO condiviso, struttura cartelle, e la provenance completa
-> (versioni, commit, deviazioni, bug incontrati).
-> Ultima verifica end-to-end: 5 luglio 2026 — inferenza OFT reale su LIBERO-Spatial funzionante.
+> Single self-contained document. Covers: system prerequisites, the two Python environments
+> (`.openvla-env`, `.oft-env`), shared LIBERO, folder structure, and full provenance
+> (versions, commit hashes, deviations, bugs encountered).
+> Last end-to-end verification: 2026-07-07 — real OFT inference on LIBERO-Spatial working,
+> LIBERO installed and verified in both venvs.
 >
-> **Ordine obbligatorio:** Sistema → Python → OpenVLA → OFT → LIBERO (in entrambi i venv).
+> **Mandatory order:** System → Python → OpenVLA → OFT → LIBERO (in both venvs).
 
 ---
 
-# PARTE I — STRUTTURA CARTELLE
+# PART I — FOLDER STRUCTURE
 
 ```
 ~/Desktop/thesis-vla/
-├── .openvla-env/                 # venv OpenVLA base (Python 3.10)
-├── .oft-env/                      # venv OpenVLA-OFT (Python 3.10)
-├── LIBERO/                        # clone UNICO condiviso, installato editable in ENTRAMBI i venv
-└── vla-benchmark/                 # repo Git di lavoro
-    ├── openvla/                    # clone repo ufficiale openvla/openvla
-    ├── openvla-oft/                # clone repo ufficiale moojink/openvla-oft
-    ├── provenance.md               # log di provenance (compilare con gli hash reali)
-    ├── run_openvla_inference.py    # inferenza OpenVLA base, quant selezionabile
-    ├── test_oft_libero.py          # test/benchmark OFT via harness ufficiale
+├── .openvla-env/                 # OpenVLA base venv (Python 3.10)
+├── .oft-env/                     # OpenVLA-OFT venv (Python 3.10)
+├── LIBERO/                       # single shared clone, installed editable in BOTH venvs
+└── vla-benchmark/                # working Git repo
+    ├── openvla/                   # official openvla/openvla clone (read-only)
+    ├── openvla-oft/                # official moojink/openvla-oft clone (read-only)
+    ├── mail/                       # MaIL clone (read-only, separate .mail-env — not yet built)
+    ├── doc/
+    │   ├── ARCHITECTURE.md         # design contract
+    │   ├── SETUP_ENV.md            # this file
+    │   └── pip-lists/              # exported pip freezes per environment
+    ├── core/ wrappers/ config/ results_io/ tests/   # the testbench package itself
+    ├── run_eval.py                 # CLI entrypoint
     └── .vscode/
-        └── settings.json           # interprete puntato al venv corretto
+        └── settings.json           # interpreter pointed at the correct venv
 ```
 
-**Note sulla struttura:**
+**Structure notes:**
 
-- `.openvla-env` e `.oft-env` stanno in `thesis-vla/` (un livello sopra `vla-benchmark/`).
-- `LIBERO/` è clonato una sola volta e installato come editable (`pip install -e .`) in
-  entrambi i venv: un solo sorgente, un solo commit da tracciare.
-- I repo `openvla/` e `openvla-oft/` stanno DENTRO `vla-benchmark/`. Aggiungi al `.gitignore`
-  di `vla-benchmark/`: `openvla/`, `openvla-oft/`, `LIBERO/`, `__pycache__/`, `*.pyc` — sono
-  repo Git separati con la loro storia, tu tieni traccia solo dei commit hash nel provenance.
+- `.openvla-env` and `.oft-env` live in `thesis-vla/` (one level above `vla-benchmark/`).
+- `LIBERO/` is cloned once and installed editable (`pip install -e .`) into both venvs: one
+  source of truth, one commit to track.
+- `openvla/`, `openvla-oft/`, and `mail/` live INSIDE `vla-benchmark/`. They are separate Git
+  repos with their own history — `vla-benchmark/.gitignore` excludes them; only their commit
+  hashes are tracked here (Part VI).
 
-**VS Code `settings.json`** (in `vla-benchmark/.vscode/`, per lo scenario "apri vla-benchmark come root"):
+**VS Code `settings.json`** (in `vla-benchmark/.vscode/`, for the "open vla-benchmark as
+root" scenario):
 
 ```json
 {
@@ -51,20 +57,20 @@
 }
 ```
 
-Per lavorare su OFT, cambia i due path in `.oft-env`. In alternativa usa un multi-root
-workspace con due `.vscode/settings.json` separati (uno per `openvla/`, uno per `openvla-oft/`).
+To work on OFT, change both paths to `.oft-env`. Alternatively use a multi-root workspace
+with two separate `.vscode/settings.json` (one for `openvla/`, one for `openvla-oft/`).
 
 ---
 
-# PARTE II — PREREQUISITI DI SISTEMA (una tantum)
+# PART II — SYSTEM PREREQUISITES (one-time)
 
-## II.1 Driver NVIDIA + CUDA Toolkit 12.8
+## II.1 NVIDIA driver + CUDA Toolkit 12.8
 
 ```bash
-nvidia-smi   # verifica driver >= 570 e GPU RTX 5080 visibile
+nvidia-smi   # verify driver >= 570 and the RTX 5080 is visible
 ```
 
-Installa CUDA Toolkit 12.8 (NON 12.9 né 13.0 — bug noti su Blackwell con quelle versioni):
+Install CUDA Toolkit 12.8 (NOT 12.9 or 13.0 — known Blackwell bugs on those versions):
 
 ```bash
 wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
@@ -77,11 +83,11 @@ echo 'export PATH=$CUDA_HOME/bin:$PATH' >> ~/.bashrc
 echo 'export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH' >> ~/.bashrc
 source ~/.bashrc
 
-nvcc --version   # DEVE dire "release 12.8"
+nvcc --version   # MUST say "release 12.8"
 ```
 
-⚠️ `nvidia-smi` mostrerà in alto `CUDA Version: 13.0` (max supportato dal driver) — è normale
-e ininfluente. La verità è `nvcc --version`.
+⚠️ `nvidia-smi` will show `CUDA Version: 13.0` at the top (max supported by the driver) —
+that's normal and irrelevant. The source of truth is `nvcc --version`.
 
 ## II.2 Python 3.10 (via deadsnakes)
 
@@ -95,21 +101,21 @@ sudo apt install python3.10 python3.10-venv python3.10-dev
 python3.10 --version   # Python 3.10.20
 ```
 
-⚠️ Python 3.10 obbligatorio: `tensorflow==2.15.0` non ha wheel per 3.12+, e le altre pin
-(`tokenizers`, `timm`) sono testate su 3.10. Se `python3.10` sparisce dopo un aggiornamento
-di sistema, reinstalla con `sudo apt install --reinstall python3.10 python3.10-venv python3.10-dev`
-e verifica che `/usr/bin/python3.10` abbia owner `root:root` e data reale.
+⚠️ Python 3.10 is mandatory: `tensorflow==2.15.0` has no wheel for 3.12+, and the other pins
+(`tokenizers`, `timm`) are tested on 3.10. If `python3.10` disappears after a system update,
+reinstall with `sudo apt install --reinstall python3.10 python3.10-venv python3.10-dev` and
+verify `/usr/bin/python3.10` is owned by `root:root` with a real timestamp.
 
-## II.3 CMake (per compilare egl_probe di LIBERO)
+## II.3 CMake (to build LIBERO's egl_probe)
 
 ```bash
 sudo apt install cmake
 cmake --version
 ```
 
-## II.4 VS Code nativo (.deb — NON Flatpak)
+## II.4 VS Code native (.deb — NOT Flatpak)
 
-Il Flatpak ha sandboxing filesystem che rompe la risoluzione degli interpreti nei venv.
+The Flatpak build has filesystem sandboxing that breaks interpreter resolution inside venvs.
 
 ```bash
 sudo apt install -y wget gpg
@@ -121,7 +127,7 @@ sudo apt install -y code
 rm packages.microsoft.gpg
 ```
 
-## II.5 Variabile d'ambiente per VRAM (mitiga OOM marginali)
+## II.5 VRAM environment variable (mitigates marginal OOMs)
 
 ```bash
 echo 'export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True' >> ~/.bashrc
@@ -130,7 +136,7 @@ source ~/.bashrc
 
 ---
 
-# PARTE III — AMBIENTE OpenVLA (`.openvla-env`)
+# PART III — OpenVLA ENVIRONMENT (`.openvla-env`)
 
 ## III.1 Venv + PyTorch
 
@@ -138,15 +144,15 @@ source ~/.bashrc
 cd ~/Desktop/thesis-vla
 python3.10 -m venv .openvla-env
 source .openvla-env/bin/activate
-which python && python --version   # DEVE mostrare .openvla-env/bin/python, 3.10.20
+which python && python --version   # MUST show .openvla-env/bin/python, 3.10.20
 
 python -m pip install --upgrade pip
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
 python -c "import torch; print(torch.__version__, torch.cuda.is_available(), torch.cuda.get_device_capability(0))"
-# Atteso: 2.11.0+cu128  True  (12, 0)
+# Expected: 2.11.0+cu128  True  (12, 0)
 ```
 
-## III.2 Clone + install OpenVLA (SEMPRE --no-deps)
+## III.2 Clone + install OpenVLA (ALWAYS --no-deps)
 
 ```bash
 cd ~/Desktop/thesis-vla/vla-benchmark
@@ -157,9 +163,10 @@ git rev-parse HEAD   # -> provenance
 pip install -e . --no-deps
 ```
 
-⚠️ Senza `--no-deps`, pip reinstallerebbe `torch==2.2.0` (pinnato nel pyproject), rompendo Blackwell.
+⚠️ Without `--no-deps`, pip would reinstall `torch==2.2.0` (pinned in the pyproject),
+breaking Blackwell support.
 
-## III.3 Dipendenze manuali (escluso torch)
+## III.3 Manual dependencies (torch excluded)
 
 ```bash
 pip install accelerate>=0.25.0 draccus==0.8.0 einops huggingface_hub json-numpy jsonlines \
@@ -170,20 +177,20 @@ pip install "dlimp @ git+https://github.com/moojink/dlimp_openvla"
 
 ## III.4 Fix protobuf / tensorflow-metadata
 
-Sintomo: `ImportError: cannot import name 'runtime_version' from 'google.protobuf'`
+Symptom: `ImportError: cannot import name 'runtime_version' from 'google.protobuf'`
 
 ```bash
 pip install "tensorflow-metadata==1.14.0" --force-reinstall --no-deps
 ```
 
-## III.5 Fix accelerate (per quantizzazione)
+## III.5 Fix accelerate (for quantization)
 
-Sintomo: `ValueError: .to is not supported for 4-bit or 8-bit bitsandbytes models`
+Symptom: `ValueError: .to is not supported for 4-bit or 8-bit bitsandbytes models`
 
 ```bash
 pip install "accelerate==0.30.1" "torch==2.11.0+cu128" \
     --extra-index-url https://download.pytorch.org/whl/cu128 --force-reinstall --no-deps
-python -c "import torch; print(torch.__version__, torch.cuda.get_device_capability(0))"  # verifica torch intatto
+python -c "import torch; print(torch.__version__, torch.cuda.get_device_capability(0))"  # verify torch is intact
 ```
 
 ## III.6 bitsandbytes
@@ -192,17 +199,17 @@ python -c "import torch; print(torch.__version__, torch.cuda.get_device_capabili
 pip install bitsandbytes
 ```
 
-## III.7 Flash-attention — NON funziona su Blackwell, usa SDPA
+## III.7 Flash-attention — does NOT work on Blackwell, use SDPA
 
 ```bash
 pip install packaging ninja
-pip install flash-attn --no-build-isolation   # compila ma fallisce a runtime
+pip install flash-attn --no-build-isolation   # compiles but fails at runtime
 ```
 
-Sintomo runtime: `RuntimeError: FlashAttention only supports Ampere GPUs or newer`.
-Non disinstallare, semplicemente usa sempre `attn_implementation="sdpa"` nel codice.
+Runtime symptom: `RuntimeError: FlashAttention only supports Ampere GPUs or newer`.
+Don't uninstall it — just always use `attn_implementation="sdpa"` in code.
 
-## III.8 Verifica finale
+## III.8 Final check
 
 ```bash
 python -c "
@@ -215,7 +222,7 @@ deactivate
 
 ---
 
-# PARTE IV — AMBIENTE OpenVLA-OFT (`.oft-env`)
+# PART IV — OpenVLA-OFT ENVIRONMENT (`.oft-env`)
 
 ## IV.1 Venv + PyTorch
 
@@ -241,7 +248,7 @@ git rev-parse HEAD   # -> provenance
 pip install -e . --no-deps
 ```
 
-## IV.3 Dipendenze manuali (escluso torch)
+## IV.3 Manual dependencies (torch excluded)
 
 ```bash
 pip install accelerate>=0.25.0 draccus==0.8.0 einops huggingface_hub json-numpy jsonlines \
@@ -250,19 +257,19 @@ pip install accelerate>=0.25.0 draccus==0.8.0 einops huggingface_hub json-numpy 
     diffusers==0.30.3 uvicorn fastapi imageio
 ```
 
-## IV.4 ⚠️ Transformers — FORK OBBLIGATORIA
+## IV.4 ⚠️ Transformers — MANDATORY FORK
 
-OFT richiede una fork custom con attenzione bidirezionale per il parallel decoding.
+OFT requires a custom fork with bidirectional attention for parallel decoding.
 
 ```bash
 pip install "transformers @ git+https://github.com/moojink/transformers-openvla-oft.git"
 pip install "dlimp @ git+https://github.com/moojink/dlimp_openvla"
 ```
 
-Nel log di install cerca `Resolved ...transformers-openvla-oft.git to commit <hash>` e annota
-l'hash. Il numero di versione mostrato resta `4.40.1` (normale, è una fork di quel tag).
+Look for `Resolved ...transformers-openvla-oft.git to commit <hash>` in the install log and
+note it down. The reported version stays `4.40.1` (normal — it's a fork of that tag).
 
-## IV.5 Fix protobuf + accelerate (identici a OpenVLA)
+## IV.5 Fix protobuf + accelerate (same as OpenVLA)
 
 ```bash
 pip install "tensorflow-metadata==1.14.0" --force-reinstall --no-deps
@@ -270,15 +277,15 @@ pip install "accelerate==0.30.1" "torch==2.11.0+cu128" \
     --extra-index-url https://download.pytorch.org/whl/cu128 --force-reinstall --no-deps
 ```
 
-## IV.6 bitsandbytes + flash-attn (stesso discorso di OpenVLA)
+## IV.6 bitsandbytes + flash-attn (same as OpenVLA)
 
 ```bash
 pip install bitsandbytes
 pip install packaging ninja
-pip install flash-attn --no-build-isolation   # fallisce a runtime, ignora, usa sdpa
+pip install flash-attn --no-build-isolation   # fails at runtime, ignore, use sdpa
 ```
 
-## IV.7 Verifica finale
+## IV.7 Final check
 
 ```bash
 python -c "
@@ -292,9 +299,9 @@ deactivate
 
 ---
 
-# PARTE V — LIBERO (condiviso tra i due ambienti)
+# PART V — LIBERO (shared between both environments)
 
-## V.1 Clone unico condiviso
+## V.1 Single shared clone
 
 ```bash
 cd ~/Desktop/thesis-vla
@@ -303,42 +310,48 @@ cd LIBERO
 git rev-parse HEAD   # -> provenance
 ```
 
-⚠️ **Mai `pip install -r requirements.txt`** (pinna torch 1.11+cu113, distruggerebbe Blackwell).
+⚠️ **Never `pip install -r requirements.txt`** (pins torch 1.11+cu113, would destroy the
+Blackwell build).
 
-## V.2 Sequenza di installazione completa e testata (per CIASCUN venv)
+## V.2 Full tested install sequence (for EACH venv)
 
-L'ordine conta: ogni pacchetto sblocca l'errore di import successivo nella catena.
+Order matters: each package unblocks the next import error in the chain.
 
 ```bash
-source ~/Desktop/thesis-vla/.openvla-env/bin/activate   # poi ripeti con .oft-env
+source ~/Desktop/thesis-vla/.openvla-env/bin/activate   # then repeat with .oft-env
 cd ~/Desktop/thesis-vla/LIBERO
 
-# 1. LIBERO stesso, senza dipendenze
+# 1. LIBERO itself, no dependencies
 pip install -e . --no-deps
 
-# 2. robosuite DEVE essere <1.5 (LIBERO usa SingleArmEnv, rimosso in 1.5)
+# 2. robosuite MUST be <1.5 (LIBERO uses SingleArmEnv, removed in 1.5)
 pip install "robosuite==1.4.1"
 pip install mujoco==3.9.0
 
 # 3. gymnasium
-pip install "gymnasium>=0.29.0"
+pip install "gymnasium>=0.29.0"   # resolved to 1.3.0 in this environment
 
-# 4. bddl DEVE essere ==1.0.1 (non l'ultima da PyPI)
+# 4. bddl MUST be ==1.0.1 (not the latest from PyPI)
 pip install "bddl==1.0.1" --force-reinstall
 
-# 5. robomimic (richiede CMake di sistema, vedi II.3)
+# 5. robomimic (requires system CMake, see II.3)
 pip install robomimic==0.2.0
 
-# 6. hf-egl-probe
+# 6. egl_probe (HF fork: hf-egl-probe / hf_egl_probe)
 pip install hf-egl-probe
 
-# 7. FIX CRITICO: bddl tira dentro numpy>=2.0 che rompe tensorflow==2.15.0
+# 7. CRITICAL FIX: bddl pulls in numpy>=2.0, which breaks tensorflow==2.15.0
 pip install "numpy<2.0.0" --force-reinstall
 ```
 
-Warning innocuo atteso: `libero 0.1.1 requires robosuite==1.4.0, but you have 1.4.1` — tollerabile.
+Harmless expected warning: `libero 0.1.1 requires robosuite==1.4.0, but you have 1.4.1` —
+tolerable.
 
-## V.3 Verifica (4 controlli)
+**Versions actually resolved and verified in both venvs** (see `doc/pip-lists/`):
+`robosuite==1.4.1`, `mujoco==3.9.0`, `gymnasium==1.3.0`, `bddl==1.0.1`, `robomimic==0.2.0`,
+`egl_probe==1.0.2`, `hf_egl_probe==1.0.2`, `numpy==1.26.4`.
+
+## V.3 Verification (4 checks)
 
 ```bash
 python -c "from libero.libero import benchmark; print('LIBERO OK')"
@@ -347,66 +360,74 @@ python -c "import tensorflow as tf; print('TF OK:', tf.__version__)"
 python -c "import torch; print(torch.__version__, torch.cuda.get_device_capability(0))"
 ```
 
-Atteso: `LIBERO OK`, `OFT+LIBERO OK`, `TF OK: 2.15.0`, `2.11.0+cu128 (12, 0)`.
-(I check 2-3 richiedono la fork transformers + moduli OFT: passeranno pienamente solo in `.oft-env`.)
+Expected: `LIBERO OK`, `OFT+LIBERO OK`, `TF OK: 2.15.0`, `2.11.0+cu128 (12, 0)`.
+(Checks 2-3 require the transformers fork + OFT modules — they will fully pass only in
+`.oft-env`.)
 
-## V.4 Ripeti V.2-V.3 nel secondo venv
+## V.4 Repeat V.2-V.3 in the second venv
 
-Stessa identica sequenza in `.oft-env` (stesso clone condiviso, install editable separato).
+Same exact sequence in `.oft-env` (same shared clone, separate editable install).
 
-## V.5 Test end-to-end OFT reale
+## V.5 Real end-to-end OFT test
 
 ```bash
 cd ~/Desktop/thesis-vla/vla-benchmark/openvla-oft
 python ../test_oft_libero.py --quant 8bit
 ```
 
-Deve dare action chunk shape `(8, 7)`, valori piccoli plausibili, VRAM picco ~8-9 GB in 8-bit.
+Should produce an action chunk of shape `(8, 7)`, plausible small values, ~8-9 GB peak VRAM
+at 8-bit.
 
 ---
 
-# PARTE VI — PROVENANCE
+# PART VI — PROVENANCE
 
-> Compila i campi `___` con i valori reali della tua installazione. Questa sezione è la fonte
-> di verità per i Metodi della tesi e per la riproducibilità.
+> Fill in the `___` fields with your actual installation values. This section is the source
+> of truth for the thesis' Methods section and for reproducibility.
 
-## VI.1 Hardware / Sistema
-
-```
-GPU:            NVIDIA GeForce RTX 5080, 16 GB (Blackwell, compute capability sm_120)
-VRAM reale disponibile: ~15.1 GB (16.3 GB nominali - ~1.1 GB overhead compositor COSMIC)
-OS:             Pop!_OS 24.04 LTS (base Ubuntu 24.04 noble)
-Driver NVIDIA:  580.159.03
-CUDA (driver):  13.0 (max supportato)
-CUDA (toolkit): 12.8.93   <- quello effettivamente usato
-Python:         3.10.20 (deadsnakes PPA)
-```
-
-## VI.2 Versioni chiave condivise (entrambi i venv)
+## VI.1 Hardware / System
 
 ```
-torch:               2.11.0+cu128   (DEVIAZIONE: repo pinnano 2.2.0, incompatibile con sm_120)
+GPU:                  NVIDIA GeForce RTX 5080, 16 GB (Blackwell, compute capability sm_120)
+Real available VRAM:  ~15.1 GB (16.3 GB nominal - ~1.1 GB COSMIC compositor overhead)
+OS:                   Pop!_OS 24.04 LTS (Ubuntu 24.04 noble base)
+NVIDIA driver:        580.159.03
+CUDA (driver):        13.0 (max supported)
+CUDA (toolkit):       12.8.93   <- the one actually used
+Python:               3.10.20 (deadsnakes PPA)
+```
+
+## VI.2 Key shared versions (both venvs)
+
+```
+torch:               2.11.0+cu128   (DEVIATION: repos pin 2.2.0, incompatible with sm_120)
 capability:          (12, 0)
 transformers:        4.40.1  (OpenVLA: standard PyPI | OFT: FORK moojink/transformers-openvla-oft)
-accelerate:          0.30.1  (DEVIAZIONE: pinnato per fix quantizzazione, era 1.14.0)
+accelerate:          0.30.1  (DEVIATION: pinned for the quantization fix, was 1.14.0)
 tensorflow:          2.15.0
-tensorflow-metadata: 1.14.0  (DEVIAZIONE: downgrade per fix protobuf runtime_version)
+tensorflow-metadata: 1.14.0  (DEVIATION: downgraded to fix the protobuf runtime_version issue)
 timm:                0.9.10
 tokenizers:          0.19.1
-numpy:               <2.0.0  (forzato per compatibilità tensorflow, dopo install LIBERO)
-bitsandbytes:        ___ (versione installata)
+numpy:               1.26.4 (<2.0.0, forced for tensorflow compatibility after installing LIBERO)
+bitsandbytes:        0.49.2
+robosuite:           1.4.1
+mujoco:              3.9.0
+gymnasium:           1.3.0
+bddl:                1.0.1
+robomimic:           0.2.0
+egl_probe / hf_egl_probe: 1.0.2
 ```
 
-## VI.3 Commit hash
+## VI.3 Commit hashes
 
 ```
 openvla (openvla/openvla):                       c8f03f48af692657d3060c19588038c7220e9af9
-openvla-oft (moojink/openvla-oft):               e4287e94541f459edc4feabc4e181f537cd569a8
-transformers fork (transformers-openvla-oft)
+openvla-oft (moojink/openvla-oft):                e4287e94541f459edc4feabc4e181f537cd569a8
+transformers fork (transformers-openvla-oft):    ___ (annotate from install log, see IV.4)
 LIBERO (Lifelong-Robot-Learning/LIBERO):         8f1084e3132a39270c3a13ebe37270a43ece2a01
 ```
 
-## VI.4 Checkpoint usati (HuggingFace)
+## VI.4 Checkpoints used (HuggingFace)
 
 ```
 OpenVLA base:  openvla/openvla-7b  (unnorm_key: bridge_orig)
@@ -414,78 +435,90 @@ OFT LIBERO:    moojink/openvla-7b-oft-finetuned-libero-spatial  (unnorm_key: lib
                moojink/openvla-7b-oft-finetuned-libero-object   (unnorm_key: libero_object_no_noops)
                moojink/openvla-7b-oft-finetuned-libero-goal     (unnorm_key: libero_goal_no_noops)
                moojink/openvla-7b-oft-finetuned-libero-10       (unnorm_key: libero_10_no_noops)
+OpenVLA base LIBERO-finetuned: openvla/openvla-7b-finetuned-libero-{spatial,object,goal,10}
+               (unnorm_key: libero_{spatial,object,goal,10} — NOTE: no _no_noops suffix,
+               unlike the OFT checkpoints above; see core/policy_wrapper.py / config/loader.py
+               unnorm_key resolution fallback)
 ```
 
-## VI.5 Deviazioni dal setup ufficiale (da citare nei Metodi della tesi)
+## VI.5 Deviations from the official setup (to cite in the thesis Methods section)
 
 ```
-1. torch 2.11.0+cu128 invece di 2.2.0
-   Motivo: RTX 5080 Blackwell (sm_120) richiede CUDA >=12.8; torch 2.2.0 non ha kernel sm_120.
-   Impatto: vincolo hardware, non scelta metodologica.
+1. torch 2.11.0+cu128 instead of 2.2.0
+   Reason: RTX 5080 Blackwell (sm_120) requires CUDA >=12.8; torch 2.2.0 has no sm_120 kernels.
+   Impact: hardware constraint, not a methodological choice.
 
-2. attn_implementation="sdpa" invece di "flash_attention_2"
-   Motivo: flash-attn 2.x rifiuta sm_120 a runtime (check hardcoded "Ampere or newer").
-   Impatto: SDPA/cuDNN colma quasi del tutto il gap prestazionale su Blackwell (~160 TFLOPS).
+2. attn_implementation="sdpa" instead of "flash_attention_2"
+   Reason: flash-attn 2.x rejects sm_120 at runtime (hardcoded "Ampere or newer" check).
+   Impact: SDPA/cuDNN nearly closes the performance gap on Blackwell (~160 TFLOPS).
 
-3. Quantizzazione 8-bit/4-bit come asse sperimentale obbligato (non opzionale)
-   Motivo: su 16GB con desktop grafico attivo, il modello bf16 (~14.2GB) rischia OOM.
-   Impatto: la quantizzazione diventa variabile indipendente dello studio, non ripiego.
-   VRAM misurate: OpenVLA base bf16 ~14.2GB | 8-bit ~7.85GB | OFT 8-bit ~8.78GB
+3. 8-bit/4-bit quantization as a mandatory experimental axis (not optional)
+   Reason: on 16GB with an active desktop compositor, the bf16 model (~14.2GB) risks OOM.
+   Impact: quantization becomes an independent variable of the study, not a fallback.
+   Measured VRAM: OpenVLA base bf16 ~14.2GB | 8-bit ~7.85GB | OFT 8-bit ~8.78GB
 
-4. accelerate 0.30.1 e tensorflow-metadata 1.14.0 (downgrade)
-   Motivo: conflitti di compatibilità con transformers==4.40.1 (rispettivamente dispatch_model
-   per quantizzazione, e protobuf runtime_version). Non alterano il comportamento dei modelli.
+4. accelerate 0.30.1 and tensorflow-metadata 1.14.0 (downgrades)
+   Reason: compatibility conflicts with transformers==4.40.1 (dispatch_model for
+   quantization, and protobuf runtime_version, respectively). Do not alter model behavior.
 ```
 
-## VI.6 Bug incontrati (riferimenti issue)
+## VI.6 Bugs encountered (issue references)
 
 ```
-- FlashAttention non supporta sm_120:         Dao-AILab/flash-attention#2361, #1665
-- nvcc segfault flash-attn per sm_120:        Dao-AILab/flash-attention#2361
-- robosuite 1.5 rimuove SingleArmEnv:         Lifelong-Robot-Learning/LIBERO#49,
-                                              ARISE-Initiative/robosuite#560
-- mamba-ssm cublasLt crash su CUDA 12.9:      state-spaces/mamba#815   (rilevante per MaIL futuro)
-- Fix mamba-ssm RTX 50 series (patch setup):  state-spaces/mamba#745   (rilevante per MaIL futuro)
+- FlashAttention doesn't support sm_120:              Dao-AILab/flash-attention#2361, #1665
+- nvcc segfault building flash-attn for sm_120:        Dao-AILab/flash-attention#2361
+- robosuite 1.5 removes SingleArmEnv:                  Lifelong-Robot-Learning/LIBERO#49,
+                                                        ARISE-Initiative/robosuite#560
+- mamba-ssm cublasLt crash on CUDA 12.9:               state-spaces/mamba#815   (relevant to future MaIL)
+- Fix for mamba-ssm on RTX 50 series (setup patch):    state-spaces/mamba#745   (relevant to future MaIL)
+- mujoco>=3.10.0 breaks robosuite==1.4.1's OSC controller (mj_fullM signature changed from
+  (m, dst, M_sparse) to (m, d, dst)): fixed by pinning mujoco==3.9.0, the newest version
+  with the old signature (see .claude/PROGRESS.md).
 ```
 
 ---
 
-# PARTE VII — CHECKLIST FINALE
+# PART VII — FINAL CHECKLIST
 
 ```
-Sistema:
+System:
 [ ] nvcc --version -> 12.8.xx
 [ ] nvidia-smi -> RTX 5080, driver >= 570
 [ ] python3.10 --version -> 3.10.20
-[ ] cmake --version funziona
-[ ] code --version funziona (nativo, non Flatpak)
+[ ] cmake --version works
+[ ] code --version works (native, not Flatpak)
 
 .openvla-env:
 [ ] torch 2.11.0+cu128, capability (12,0)
 [ ] transformers 4.40.1 (standard), tensorflow 2.15.0, timm 0.9.10
 [ ] accelerate 0.30.1, tensorflow-metadata 1.14.0, numpy <2.0.0
 [ ] bitsandbytes OK
-[ ] LIBERO importabile
-[ ] run_openvla_inference.py --quant 8bit funziona
+[ ] LIBERO importable (robosuite 1.4.1, mujoco 3.9.0, gymnasium 1.3.0, bddl 1.0.1,
+    robomimic 0.2.0, egl_probe/hf_egl_probe 1.0.2)
+[ ] run_openvla_inference.py --quant 8bit works
 
 .oft-env:
 [ ] torch 2.11.0+cu128, capability (12,0)
-[ ] transformers FORK (commit annotato), diffusers 0.30.3, dlimp OK
-[ ] robosuite <1.5, gymnasium, bddl==1.0.1, robomimic, hf-egl-probe, numpy <2.0.0
-[ ] LIBERO importabile + GenerateConfig importabile
+[ ] transformers FORK (commit noted), diffusers 0.30.3, dlimp OK
+[ ] LIBERO importable (same package set as .openvla-env) + GenerateConfig importable
 [ ] test_oft_libero.py --quant 8bit -> action chunk (8,7), VRAM ~8-9GB
 
+.mail-env (not yet built):
+[ ] TODO — separate Python/CUDA/mamba-ssm stack, see mail/requirements.txt and
+    doc/pip-lists/.mail-env.pip.md (to be created)
+
 Provenance:
-[ ] tutti i commit hash compilati (VI.3)
-[ ] versione bitsandbytes annotata (VI.2)
+[ ] all commit hashes filled in (VI.3)
+[ ] bitsandbytes version annotated (VI.2)
 ```
 
 ---
 
-# NOTE — VRAM su desktop Linux nativo
+# NOTE — VRAM on native Linux desktop
 
-Su Pop!\_OS nativo il compositor COSMIC + finestre aperte occupano ~1-1.5GB di VRAM prima di
-lanciare Python. Su 16.3GB nominali il budget reale è ~15GB. Il modello bf16 (~14.2GB) rischia
-OOM. Diverso da WSL2/server headless dove la GPU non è condivisa con un compositor grafico.
-Soluzioni: (1) chiudere app grafiche, (2) quantizzazione 8/4-bit, (3) TTY con display manager
-fermato. Da citare in tesi come vincolo pratico del deployment su hardware consumer.
+On native Pop!\_OS, the COSMIC compositor + open windows use ~1-1.5GB of VRAM before Python
+even starts. Out of a nominal 16.3GB, the real budget is ~15GB. The bf16 model (~14.2GB)
+risks OOM. This differs from WSL2/headless servers where the GPU isn't shared with a
+graphical compositor. Mitigations: (1) close graphical apps, (2) use 8/4-bit quantization,
+(3) run from a TTY with the display manager stopped. Cite this in the thesis as a practical
+constraint of deploying on consumer hardware.

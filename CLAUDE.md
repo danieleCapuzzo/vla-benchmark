@@ -2,68 +2,95 @@
 
 ## What we are building
 
-A **modular testbench** to compare three Vision-Language-Action Models su LIBERO, 
-focusing on **real-time metrics** (latency, throughput, VRAM) and success rate, trajectory smoothness.
-Models: **OpenVLA**, **OpenVLA-OFT**, **MaIL** (Mamba imitation learning).
+A **modular testbench** comparing three Vision-Language-Action models on LIBERO —
+**OpenVLA**, **OpenVLA-OFT**, **MaIL** (Mamba imitation learning) — focused on **real-time
+metrics** (latency, throughput, VRAM) alongside success rate and trajectory smoothness.
 
-A full architectural specification is available at: `doc/ARCHITECTURE.md` (read it before coding).
-For environment setup refer to: `doc/SETUP_ENV.md` but read it only if asked.
+Read if requested by user: `doc/ARCHITECTURE.md` (design contract).
+Read only if asked: `doc/SETUP_ENV.md` (environment build instructions).
 
-## Package versions — Read before coding
-Exact package versions of every environment are reported in dedicated files located at `doc/pip-lists/...`
-** Refer to that file before using specific APIs as versions are pinned for compatibility purposes**:
+## Package versions — read before using any model API
 
-- `pip-lists/openvla-env.pip.md`  OpenVLA base environment
-- `pip-lists/oft-env.pip.md`      OpenVLA-OFT environment (transformers è una FORK, works for openvla as well)
-- `pip-lists/mail-env.pip.md`     MaIL environment (mamba-ssm, Python/CUDA diversi)
+Exact pinned versions per environment live in `doc/pip-lists/`:
 
-Never assume standard vesions, consider those in the files such as `transformers==4.40.1`, `accelerate==0.30.1`
-, `numpy<2.0.0`, `robosuite<1.5`, `torch==2.11.0+cu128` (build Blackwell).
+- `.openvla-env.pip.md` — OpenVLA base environment
+- `.oft-env.pip.md` — OpenVLA-OFT environment (transformers is a FORK, runs openvla-oft ONLY)
+- `.mail-env.pip.md` — MaIL environment (mamba-ssm, different Python/CUDA) — not yet created
 
-## Available hardware — NON NEGOTIABLE 
-- **GPU: RTX 5080, 16 GB (Blackwell, sm_120).** real VRAM budget ~15 GB (overhead compositor).
-- **flash-attn does not work** on Blackwell, so use `attn_implementation="sdpa"`.
-- **Quantization**: models should be loadable in `none`/`8bit`/`4bit` as in the original papers.
-  for quantized models use `device_map="auto"`, NEVER `.to("cuda")`; `pixel_values` should be
-  `float16` (non bfloat16) for full precision vision backbone.
-- **torch 2.11.0+cu128**: never overwrite it (use `--no-deps` on install).
+Never assume standard versions — e.g. `transformers==4.40.1`, `accelerate==0.30.1`,
+`numpy<2.0.0`, `robosuite==1.4.1` (must be `<1.5`), `torch==2.11.0+cu128` (Blackwell build).
 
-## Design rules (read ARCHITECTURE.md for the full contract)
-- **Do not duplicate** official harnesses, import them as libraries and wrap them.
-- Each model should implement the abstract interface `PolicyWrapper` (Strategy pattern).
-- `LiberoEvaluator` is the Facade; `PolicyFactory` instantiates wrappers; evaluation loop must be identical for all models.
-- Adding a model should be as adding a new wrapper + registering it on the factory with no core modification.
+## Available hardware — NON-NEGOTIABLE
+
+- **GPU: RTX 5080, 16 GB (Blackwell, sm_120).** Real VRAM budget ~15 GB (compositor overhead).
+- **flash-attn does not work** on Blackwell — always use `attn_implementation="sdpa"`.
+- **Quantization**: models must be loadable in `none`/`8bit`/`4bit` as in the original papers.
+  Quantized models use `device_map="auto"`, NEVER `.to("cuda")`; `pixel_values` must be
+  `float16` (not `bfloat16`) whenever quantized.
+- **torch 2.11.0+cu128**: never overwrite it (`--no-deps` on any install that touches it).
+
+## Design rules (see ARCHITECTURE.md for the full contract)
+
+- Do not duplicate official harnesses — import them as libraries and wrap them. If wrapping
+  cleanly would mean copying substantial official logic to avoid spaghetti code, ask the
+  user first.
+- Each model implements the abstract `PolicyWrapper` interface (Strategy pattern).
+- `LiberoEvaluator` is the Facade; `PolicyFactory` instantiates wrappers; the evaluation loop
+  is identical for all models.
+- Adding a model = new wrapper + factory registration, no changes to core.
 
 ## Evaluation protocol (FROZEN)
 
-- **20 rollout/task** (200/suite), same tasks and initial states for all models.
-- 4 suite: Spatial, Object, Goal, Long.
-- Camere: **1 (agentview) primary**; optional support for 2 if the model can handle them (OpenVLA-OFT and MambaIL do).
-- Real-time metrics: latency (mean/p95/p99), throughput (actions/s, frequency ...) , Peak VRAM, time-to-first-action.
-- Output: `episodes.jsonl` + `summary.csv` + `provenance.json` for each run.
+- 20 rollouts/task (200/suite), identical tasks and initial states across all models.
+- 4 suites: Spatial, Object, Goal, Long.
+- Cameras: 1 (agentview) primary; 2 optional for models that support it (OpenVLA-OFT, MaIL).
+- Real-time metrics: latency (mean/p95/p99), throughput (actions/s, frequency), peak VRAM,
+  time-to-first-action.
+- Output per run: `episodes.jsonl` + `summary.csv` (+ `provenance.json`, not yet implemented).
+
+## Repo layout
+
+```
+run_eval.py         CLI entrypoint (repo root, works from any cwd)
+core/               PolicyWrapper contract, PolicyFactory, LiberoEvaluator, shared LIBERO utils
+wrappers/           one adapter per model (openvla_wrapper.py, oft_wrapper.py, mail_wrapper.py)
+                    + wrapper_utils.py shared by the OpenVLA-family wrappers
+config/             config_openvla.json / config_oft.json (checkpoints, unnorm_keys) + loader.py
+results_io/         episodes.jsonl / summary.csv writers
+results/            run outputs (one dir per run)
+tests/              pytest, mocked transformers/prismatic — no GPU/network required
+doc/                ARCHITECTURE.md, SETUP_ENV.md, pip-lists/
+
+openvla/            official repos — READ-ONLY, see below
+openvla-oft/
+LIBERO/
+mail/
+```
 
 ## Environments and how to run
 
-A run = one model. User activates the correct venv before launching. Available aliases are 
-- `oft-env` → OpenVLA base E OpenVLA-OFT
-- `mail-env` → MaIL
-to activate the correct venv
+A run = one model. Activate the matching venv before launching:
+
+- `.oft-env` → base OpenVLA **and** OpenVLA-OFT
+- `.mail-env` → MaIL (not yet built)
 
 ```bash
-# example (assume user already activated the correct venv)
-python testbench/run_eval.py --model oft --suite spatial --quant 8bit --num-cameras 1 --rollouts 20
+# example (assumes the correct venv is already active)
+python run_eval.py --model oft --suite spatial --quant 8bit --num-cameras 1 --rollouts 20
 ```
 
-## Code Conventions
+## Code conventions
 
-- Python 3.10 (VLA) / see pip-list for MaIL. Mandatory Type hints on all public interfaces.
-- Timing: always use `torch.cuda.synchronize()` before/after latency measures, discard warm-up runs.
-- Each latency measure must consider only the time required for the model call, no preprocessing.
-- Do not introduce dependencies without checking compatibility.
-- Environment errors or import must be reported to user, do not fix randomly.
+- Python 3.10. Mandatory type hints on all public interfaces.
+- Timing: always `torch.cuda.synchronize()` before/after latency measurement; discard
+  warm-up runs.
+- Latency must measure only the model call itself, never preprocessing.
+- Do not introduce dependencies without checking compatibility against `doc/pip-lists/`.
+- Report environment/import errors to the user — do not silently work around them.
 
 ## What NOT to do
-- Do not modify files in `openvla/`, `openvla-oft/`, `LIBERO/`, `MaIL/` (official read-only repositories).
+
+- Do not modify `openvla/`, `openvla-oft/`, `LIBERO/`, `mail/` (official read-only repos).
 - Do not use `flash_attention_2`.
-- Do not ever override torch version (`--no-deps` where needed).
-- Never assume package versions, consult `pip-lists/`.
+- Never override the pinned torch version (`--no-deps` where needed).
+- Never assume package versions — consult `doc/pip-lists/`.
