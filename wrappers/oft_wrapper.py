@@ -10,29 +10,13 @@ from __future__ import annotations
 import os
 import sys
 import time
-import warnings
 from pathlib import Path
 from typing import Any, Dict
 
 import numpy as np
 import torch
 
-os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
-os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
-os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
-
-# ignore cosmetic warnings from robosuite/torch internals that are not generated here
-warnings.filterwarnings(
-    "ignore", category=DeprecationWarning, module=r"torch\.jit\._script"
-)
-warnings.filterwarnings(
-    "ignore", category=DeprecationWarning, module=r"importlib\._bootstrap"
-)
-warnings.filterwarnings(
-    "ignore",
-    category=UserWarning,
-    message=r"MatMul8bitLt: inputs will be cast from .* to float16 during quantization",
-)
+from wrappers.wrapper_utils import OPENVLA_INPUT_RESOLUTION
 
 # patch issue with official OFT harness using package-relative imports
 # that only resolve when openvla-oft/ is on sys.path
@@ -42,15 +26,23 @@ if str(_OFT_REPO_ROOT) not in sys.path:
 
 from core.factory import PolicyFactory  # noqa: E402
 from core.policy_wrapper import PolicyMetadata, PolicyOutput, PolicyWrapper  # noqa: E402
-
-# mandatory input resolution (resize target for both cameras).
-_OFT_INPUT_RESOLUTION = 224
+from experiments.robot.libero.run_libero_eval import GenerateConfig  # noqa: E402
+from experiments.robot.openvla_utils import (  # noqa: E402
+    get_action_head,
+    get_processor,
+    get_proprio_projector,
+    get_vla,
+    get_vla_action,
+    resize_image_for_policy,
+)
+from prismatic.vla.constants import NUM_ACTIONS_CHUNK, PROPRIO_DIM  # noqa: E402
 
 
 @PolicyFactory.register("oft")
 class OftWrapper(PolicyWrapper):
     """
-    Adapter pattern: adapts OFT's `get_vla_action` API to the PolicyWrapper contract."""
+    Adapter pattern: adapts OFT's `get_vla_action` API to the PolicyWrapper contract.
+    """
 
     def __init__(self, checkpoint: str, unnorm_key: str) -> None:
         """
@@ -91,15 +83,7 @@ class OftWrapper(PolicyWrapper):
         # patch official OFT assumption that cwd == openvla-oft/
         os.chdir(_OFT_REPO_ROOT)
 
-        from experiments.robot.libero.run_libero_eval import GenerateConfig
-        from experiments.robot.openvla_utils import (
-            get_action_head,
-            get_processor,
-            get_proprio_projector,
-            get_vla,
-        )
-        from prismatic.vla.constants import NUM_ACTIONS_CHUNK, PROPRIO_DIM
-
+        # set env variables and prepare configuration
         self._quant = quant
         self._num_cameras = num_cameras
         self._num_actions_chunk = NUM_ACTIONS_CHUNK
@@ -157,20 +141,16 @@ class OftWrapper(PolicyWrapper):
             PolicyOutput with actions of shape (NUM_ACTIONS_CHUNK, ACTION_DIM), is_chunked=True,
             and the model-only latency in seconds.
         """
-        from experiments.robot.openvla_utils import (
-            get_vla_action,
-            resize_image_for_policy,
-        )
 
         model_obs: Dict[str, Any] = {
             "full_image": resize_image_for_policy(
-                observation["full_image"], _OFT_INPUT_RESOLUTION
+                observation["full_image"], OPENVLA_INPUT_RESOLUTION
             ),
             "state": observation["state"],
         }
         if "wrist_image" in observation:
             model_obs["wrist_image"] = resize_image_for_policy(
-                observation["wrist_image"], _OFT_INPUT_RESOLUTION
+                observation["wrist_image"], OPENVLA_INPUT_RESOLUTION
             )
 
         torch.cuda.synchronize()
@@ -212,5 +192,7 @@ class OftWrapper(PolicyWrapper):
         )
 
     def get_vram_footprint_gb(self) -> float:
-        """Returns peak allocated VRAM (GB) observed since the last `reset_peak_memory_stats()`."""
+        """
+        Returns peak allocated VRAM (GB) observed since the last reset_peak_memory_stats().
+        """
         return torch.cuda.max_memory_allocated() / 1e9

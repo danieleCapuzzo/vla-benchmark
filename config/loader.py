@@ -16,9 +16,11 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Iterable
 
-DEFAULT_CONFIG_PATH = Path(__file__).parent / "config.json"
+DEFAULT_CONFIG_PATH = Path(__file__).parent / "config_oft.json"
+
+_NO_NOOPS_SUFFIX = "_no_noops"
 
 # frozen value for the evaluation protocol (see doc/ARCHITECTURE.md "20 rollout/task").
 # any override is NON-PROTOCOL (smoke tests only) and will be highlighted to the user.
@@ -72,7 +74,7 @@ def load_config(path: str | Path = DEFAULT_CONFIG_PATH) -> RunConfig:
     Loads the run configuration from a JSON file.
 
     Args:
-        path: path to the JSON config file, defaults to `config/config.json`.
+        path: path to the JSON config file, defaults to `config/config_oft.json`.
 
     Returns:
         a populated `RunConfig` class.
@@ -103,3 +105,27 @@ def load_config(path: str | Path = DEFAULT_CONFIG_PATH) -> RunConfig:
         output_dir=raw.get("output_dir", "results"),
         suites=suites,
     )
+
+
+def resolve_unnorm_key(unnorm_key: str, available_keys: Iterable[str]) -> str:
+    """
+    Strips the mistaken _no_noops suffix on unnorm_key
+
+    Args:
+        unnorm_key: `unnorm_key` as configured (from `SuiteConfig`).
+        available_keys: the checkpoint's actual norm_stats keys.
+
+    Returns:
+        `unnorm_key` unchanged if already present in `available_keys`, otherwise the
+        `_no_noops`-toggled variant if that one is present instead.
+    """
+    available_keys = set(available_keys)
+    if unnorm_key in available_keys:
+        return unnorm_key
+    if unnorm_key.endswith(_NO_NOOPS_SUFFIX):
+        stripped = unnorm_key[: -len(_NO_NOOPS_SUFFIX)]
+        if stripped in available_keys:
+            return stripped
+    elif f"{unnorm_key}{_NO_NOOPS_SUFFIX}" in available_keys:
+        return f"{unnorm_key}{_NO_NOOPS_SUFFIX}"
+    return unnorm_key

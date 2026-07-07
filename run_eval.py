@@ -3,18 +3,62 @@
 CLI entrypoint: wires PolicyFactory -> wrapper -> LiberoEvaluator -> results_io.
 Example:
     python run_eval.py --model oft --suite spatial --quant 8bit --num-cameras 1 --rollouts 20
-    python run_eval.py --model oft --suite all --quant 8bit --num-cameras 2  # full benchmark
+    python run_eval.py --model openvla --suite all --quant 8bit  # full benchmark
+
+Config is auto-selected per --model (config/config_<model>.json) unless --config is given
+explicitly (see `default_config_for`).
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
+import warnings
 from pathlib import Path
 from typing import Any, Dict, List
 
-import torch
+# set warning level
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+os.environ["GRPC_VERBOSITY"] = "ERROR"
+os.environ["GLOG_minloglevel"] = "2"
+os.environ["TRANSFORMERS_VERBOSITY"] = "error"
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
+# stops tokenizer parallelism to avoid deadlock issue
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+
+def _suppress_noisy_warnings() -> None:
+    """
+    Silences cosmetic DeprecationWarnings/UserWarnings from torch/accelerate/importlib
+    internals.
+    """
+    warnings.filterwarnings(
+        "ignore", category=DeprecationWarning, message=r"`torch\.jit\..*` is deprecated"
+    )
+    warnings.filterwarnings(
+        "ignore",
+        category=DeprecationWarning,
+        message=r"the load_module\(\) method is deprecated",
+    )
+    warnings.filterwarnings(
+        "ignore",
+        category=DeprecationWarning,
+        message=r"The 'warn' method is deprecated",
+    )
+    warnings.filterwarnings(
+        "ignore",
+        category=UserWarning,
+        message=r"MatMul8bitLt: inputs will be cast from .* to float16 during quantization",
+    )
+
+
+_suppress_noisy_warnings()
+
+import torch  # noqa: E402
 
 # import repo-root packages
 # ensure clean import regardless of caller cwd
@@ -25,18 +69,33 @@ from config.loader import FROZEN_ROLLOUTS_PER_TASK, RunConfig, load_config  # no
 from core.factory import PolicyFactory  # noqa: E402
 
 # trigger wrapper registration using @PolicyFactory.register decorators.
-# suppress warnings
 import wrappers.openvla_wrapper  # noqa: E402,F401
 import wrappers.oft_wrapper  # noqa: E402,F401
 import wrappers.mail_wrapper  # noqa: E402,F401
 from core.evaluator import LiberoEvaluator  # noqa: E402
 from results_io.results import (  # noqa: E402
-    write_cross_run_summary,
+    write_all_suites_json,
     write_episodes_jsonl,
     write_summary_csv,
 )
 
+# kill warnings
+_suppress_noisy_warnings()
+
 ALL_SUITES = ["spatial", "object", "goal", "long"]
+
+# per-model default config file (config/config_<model>.json). "mail" has no config yet
+# (wrapper unimplemented); falls back to the OFT config until MaIL's own config lands.
+_DEFAULT_CONFIG_BY_MODEL = {
+    "openvla": "config_openvla.json",
+    "oft": "config_oft.json",
+    "mail": "config_oft.json",
+}
+
+
+def default_config_for(model: str) -> Path:
+    """Returns the default `config/config_<model>.json` path for the given --model."""
+    return REPO_ROOT / "config" / _DEFAULT_CONFIG_BY_MODEL[model]
 
 
 def parse_args() -> argparse.Namespace:
@@ -65,13 +124,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--config",
         default=None,
-        help="Path to config JSON (default: config/config.json)",
+        help="Path to config JSON (default: config/config_<model>.json, auto-selected by --model)",
+    )
+    parser.add_argument(
+        "--save-videos",
+        action="store_true",
+        help="Save an MP4 replay per trial to <suite_dir>/videos/ (debug aid; off by "
+        "default since it writes one file per rollout).",
     )
     return parser.parse_args()
 
 
 def resolve_suites(requested: List[str]) -> List[str]:
-    """Expands 'all' and de-duplicates while preserving first-seen order."""
+    """
+    Expands 'all' and de-duplicates while preserving first-seen order.
+    """
     if "all" in requested:
         return list(ALL_SUITES)
     seen = []
@@ -90,9 +157,11 @@ def run_one_suite(
     num_cameras: int,
     rollouts: int,
     seed: int,
-    output_dir_path: Path,
+    run_dir: Path,
+    save_videos: bool = False,
 ) -> Dict[str, Any]:
-    """Runs a full evaluation for a single suite and writes its per-run result files.
+    """
+    Runs a full evaluation for a single suite and writes its per-run result files.
 
     Args:
         model: Model id passed to `PolicyFactory.create` (e.g. "oft").
@@ -102,7 +171,12 @@ def run_one_suite(
         num_cameras: Number of cameras fed to the policy.
         rollouts: Rollouts per task for this run.
         seed: Random seed, recorded in the summary row.
-        output_dir_path: Absolute base output directory (see `main`'s cwd-anchoring).
+        run_dir: Top-level directory for this invocation (`results/{model}_{timestamp}/`,
+            shared by every suite in this invocation; see `main`). This suite's
+            `episodes.jsonl`/`summary.csv` are written to a `{suite}_{quant}_{ncam}cam/`
+            subfolder within it.
+        save_videos: If True, saves an MP4 replay per trial under
+            `<suite_dir>/videos/` (see `core.core_utils.write_rollout_video`).
 
     Returns:
         The aggregated summary row dict for this suite (as written to its `summary.csv`),
@@ -117,43 +191,52 @@ def run_one_suite(
         )
     suite_cfg = cfg.suites[suite]
 
-    # Fresh checkpoint per suite (each suite ships its own fine-tuned checkpoint) -- reset
-    # peak-memory stats first so this suite's VRAM peak isn't inflated by the previous
-    # suite's (now-freed) model.
+    # reset peak-memory stats first so this suite's VRAM peak
+    # isn't inflated by the previous suite's (now-freed) model.
     torch.cuda.reset_peak_memory_stats()
 
+    print(
+        f"\n\n=== Loading {model} / {suite} ({quant}, {num_cameras}cam) "
+        f"-- {suite_cfg.checkpoint} ==="
+    )
+    load_t0 = time.perf_counter()
     wrapper = PolicyFactory.create(
         model,
         checkpoint=suite_cfg.checkpoint,
         unnorm_key=suite_cfg.unnorm_key,
     )
     wrapper.load(quant=quant, num_cameras=num_cameras)
+    print(f"[{suite}] Loaded in {time.perf_counter() - load_t0:.1f}s")
+    # transformers/accelerate/bitsandbytes internals triggered by wrapper.load() reset the
+    # global warnings.filters list as a side effect -- reassert ours (see
+    # `_suppress_noisy_warnings` docstring).
+    _suppress_noisy_warnings()
+
+    suite_dir = run_dir / f"{suite}_{quant}_{num_cameras}cam"
 
     evaluator = LiberoEvaluator(
         task_suite_name=suite_cfg.task_suite_name,
         num_steps_wait=cfg.num_steps_wait,
+        video_dir=(suite_dir / "videos") if save_videos else None,
     )
     episodes = evaluator.run(wrapper, num_rollouts_per_task=rollouts)
 
     metadata = wrapper.get_metadata()
     vram_peak_gb = wrapper.get_vram_footprint_gb()
-    timestamp = time.strftime("%Y%m%d-%H%M%S")
-    run_dir = output_dir_path / f"{model}_{suite}_{quant}_{num_cameras}cam_{timestamp}"
 
-    write_episodes_jsonl(run_dir / "episodes.jsonl", episodes)
+    write_episodes_jsonl(suite_dir / "episodes.jsonl", episodes)
     row = write_summary_csv(
-        run_dir / "summary.csv",
+        suite_dir / "summary.csv",
         episodes,
         metadata,
         seed=seed,
         vram_peak_gb=vram_peak_gb,
     )
 
-    print(f"[{suite}] Run complete. Results written to {run_dir}")
+    print(f"[{suite}] Run complete. Results written to {suite_dir}")
     print(f"[{suite}] VRAM peak: {vram_peak_gb:.2f} GB")
 
-    # Free the model before the next suite loads its own checkpoint -- prevents VRAM
-    # accumulation across suites on the 16 GB card and keeps each suite's peak independent.
+    # free the model before next suite
     del wrapper
     torch.cuda.empty_cache()
 
@@ -162,7 +245,8 @@ def run_one_suite(
 
 def main() -> None:
     args = parse_args()
-    cfg = load_config(args.config) if args.config else load_config()
+    cfg_path = Path(args.config) if args.config else default_config_for(args.model)
+    cfg = load_config(cfg_path)
 
     # default to configuration if not provided
     quant = args.quant if args.quant is not None else cfg.quant
@@ -176,6 +260,11 @@ def main() -> None:
     output_dir_path = Path(output_dir)
     if not output_dir_path.is_absolute():
         output_dir_path = REPO_ROOT / output_dir_path
+
+    # one shared timestamp for this whole invocation -- every suite run below writes into
+    # the same results/{model}_{timestamp}/ parent, instead of each suite getting its own.
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    run_dir = output_dir_path / f"{args.model}_{timestamp}"
 
     # warn of different num rollouts than expected
     if rollouts != FROZEN_ROLLOUTS_PER_TASK:
@@ -196,16 +285,16 @@ def main() -> None:
             num_cameras=num_cameras,
             rollouts=rollouts,
             seed=seed,
-            output_dir_path=output_dir_path,
+            run_dir=run_dir,
+            save_videos=args.save_videos,
         )
         for suite in suites
     ]
 
     if len(suites) > 1:
-        timestamp = time.strftime("%Y%m%d-%H%M%S")
-        cross_run_path = output_dir_path / f"suite_{'-'.join(suites)}_{timestamp}.csv"
-        write_cross_run_summary(cross_run_path, rows)
-        print(f"Cross-run summary ({len(suites)} suites) written to {cross_run_path}")
+        all_suites_path = run_dir / "all_suites.json"
+        write_all_suites_json(all_suites_path, rows)
+        print(f"Cross-run summary ({len(suites)} suites) written to {all_suites_path}")
 
 
 if __name__ == "__main__":
