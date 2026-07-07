@@ -6,8 +6,8 @@ Output format:
     and summary.csv (one aggregated row per suite).
 
 Note:
-    if more than one suite is executed, an overall summary file
-    named summary_<suite1>-<suite2>-<suiteN> will be produced
+    if more than one suite is executed, an overall summary file named
+    all_suites.json (one row per suite) will be produced at the run's top level.
 """
 
 from __future__ import annotations
@@ -78,7 +78,7 @@ def write_summary_csv(
     Returns:
         The row dict that was written, keyed by `SUMMARY_CSV_FIELDS` -- reused by callers
         that aggregate multiple suite runs into a cross-run summary (see
-        `write_cross_run_summary`) without re-reading the file back.
+        `write_all_suites_json`) without re-reading the file back.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -143,20 +143,17 @@ def write_summary_csv(
     return row
 
 
-def write_cross_run_summary(path: str | Path, rows: List[Dict[str, Any]]) -> None:
+def write_all_suites_json(path: str | Path, rows: List[Dict[str, Any]]) -> None:
     """
     Writes a combined summary with one row per suite, for a multi-suite invocation.
-    Vertical stack of per-suite summaries sharing the same `SUMMARY_CSV_FIELDS`
-    --> loadable with pandas for cross-suite comparison tables.
+    List of per-suite summary rows (same fields as `summary.csv`, see
+    `SUMMARY_CSV_FIELDS`) --> loadable for cross-suite comparison.
 
     Args:
-        path: destination file path (typically ".../suite_<s1>-<s2>-..._<timestamp>.csv").
+        path: destination file path (typically ".../all_suites.json").
         rows: one summary row dict per suite, as returned by `write_summary_csv`.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=SUMMARY_CSV_FIELDS)
-        writer.writeheader()
-        for row in rows:
-            writer.writerow(row)
+    with open(path, "w") as f:
+        json.dump(rows, f, indent=2)

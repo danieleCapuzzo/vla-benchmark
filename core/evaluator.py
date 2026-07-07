@@ -30,9 +30,7 @@ if str(_OFT_REPO_ROOT) not in sys.path:
 from core.policy_wrapper import PolicyWrapper  # noqa: E402
 
 
-# LIBERO-generic per-suite step budgets, taken from the official harness
-# (openvla-oft/experiments/robot/libero/run_libero_eval.py TASK_MAX_STEPS). These reflect the
-# longest training demo per suite and are not model-specific.
+# LIBERO-generic per-suite step budgets
 TASK_MAX_STEPS: Dict[str, int] = {
     "libero_spatial": 220,
     "libero_object": 280,
@@ -57,7 +55,9 @@ class LiberoEvaluator:
         self._num_steps_wait = num_steps_wait
         self._max_steps = TASK_MAX_STEPS[task_suite_name]
 
-    def run(self, wrapper: PolicyWrapper, num_rollouts_per_task: int) -> List[Dict[str, Any]]:
+    def run(
+        self, wrapper: PolicyWrapper, num_rollouts_per_task: int
+    ) -> List[Dict[str, Any]]:
         """Runs `num_rollouts_per_task` episodes for every task in the suite.
 
         Args:
@@ -77,23 +77,47 @@ class LiberoEvaluator:
         benchmark_dict = benchmark.get_benchmark_dict()
         task_suite = benchmark_dict[self._task_suite_name]()
 
+        print(
+            f"[{self._task_suite_name}] {task_suite.n_tasks} tasks x "
+            f"{num_rollouts_per_task} rollouts = {task_suite.n_tasks * num_rollouts_per_task} episodes"
+        )
+
         episodes: List[Dict[str, Any]] = []
         for task_id in range(task_suite.n_tasks):
             task = task_suite.get_task(task_id)
             initial_states = task_suite.get_task_init_states(task_id)
-            env, task_description = get_libero_env(task, model_family="openvla", resolution=256)
+            env, task_description = get_libero_env(
+                task, model_family="openvla", resolution=256
+            )
 
-            for trial in range(num_rollouts_per_task):
-                initial_state = initial_states[trial]
-                episode = self._run_episode(
-                    wrapper=wrapper,
-                    env=env,
-                    task_description=task_description,
-                    initial_state=initial_state,
-                    task_id=task_id,
-                    trial=trial,
-                )
-                episodes.append(episode)
+            print(
+                f"[{self._task_suite_name}] task {task_id + 1}/{task_suite.n_tasks}: "
+                f'"{task_description}"'
+            )
+            successes = 0
+            try:
+                for trial in range(num_rollouts_per_task):
+                    initial_state = initial_states[trial]
+                    episode = self._run_episode(
+                        wrapper=wrapper,
+                        env=env,
+                        task_description=task_description,
+                        initial_state=initial_state,
+                        task_id=task_id,
+                        trial=trial,
+                    )
+                    episodes.append(episode)
+                    successes += int(episode["success"])
+                    print(
+                        f"  trial {trial + 1}/{num_rollouts_per_task}  "
+                        f"{'OK  ' if episode['success'] else 'FAIL'}  "
+                        f"steps={episode['num_steps']:<4d} "
+                        f"lat={episode['lat_mean_s'] * 1000:.0f}ms  "
+                        f"(success {successes}/{trial + 1})"
+                    )
+            finally:
+                # explicitly release MuJoco sim + EGL renderer
+                env.close()
 
         return episodes
 
@@ -108,7 +132,10 @@ class LiberoEvaluator:
     ) -> Dict[str, Any]:
         """Runs a single episode and returns its result dict."""
         from experiments.robot.libero.libero_utils import get_libero_dummy_action
-        from experiments.robot.robot_utils import invert_gripper_action, normalize_gripper_action
+        from experiments.robot.robot_utils import (
+            invert_gripper_action,
+            normalize_gripper_action,
+        )
 
         env.reset()
         obs = env.set_init_state(initial_state)
