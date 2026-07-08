@@ -31,6 +31,7 @@ from core.core_utils import (
     normalize_gripper_action,
     quat2axisangle,
 )
+from core.metrics import compute_smoothness
 from core.policy_wrapper import PolicyWrapper
 
 
@@ -82,7 +83,7 @@ class LiberoEvaluator:
         Returns:
             A list of per-episode result dicts, one per (task, trial), each with keys
             "suite", "task_id", "trial", "success", "num_steps", "latencies_s", "lat_mean_s",
-            "is_chunked", "chunk_size".
+            "is_chunked", "chunk_size", "duration_s", "smoothness".
         """
         from libero.libero import benchmark
 
@@ -143,12 +144,14 @@ class LiberoEvaluator:
         trial: int,
     ) -> Dict[str, Any]:
         """Runs a single episode and returns its result dict."""
+        episode_t0 = time.perf_counter()
         env.reset()
         obs = env.set_init_state(initial_state)
         wrapper.reset()
 
         action_queue: deque = deque()
         latencies_s: List[float] = []
+        raw_actions: List[np.ndarray] = []
         success = False
         num_steps = 0
         is_chunked = True
@@ -173,6 +176,7 @@ class LiberoEvaluator:
                 action_queue.extend(output.actions)
 
             action = action_queue.popleft()
+            raw_actions.append(np.asarray(action, dtype=np.float32).copy())
             action = normalize_gripper_action(action, binarize=True)
             action = invert_gripper_action(action)
 
@@ -182,6 +186,8 @@ class LiberoEvaluator:
                 success = True
                 break
             t += 1
+
+        duration_s = time.perf_counter() - episode_t0
 
         if self._video_dir is not None:
             from core.core_utils import write_rollout_video
@@ -194,6 +200,15 @@ class LiberoEvaluator:
                 success=success,
             )
 
+        # smoothness computed as post-hoc aggregation of actions
+        # does not skew episode duration measures.
+        actions_arr = (
+            np.stack(raw_actions, axis=0)
+            if raw_actions
+            else np.empty((0, 7), dtype=np.float32)
+        )
+        smoothness = compute_smoothness(actions_arr)
+
         lat_mean_s = float(np.mean(latencies_s)) if latencies_s else 0.0
         return {
             "suite": self._task_suite_name,
@@ -205,6 +220,8 @@ class LiberoEvaluator:
             "lat_mean_s": lat_mean_s,
             "is_chunked": is_chunked,
             "chunk_size": chunk_size,
+            "duration_s": duration_s,
+            "smoothness": smoothness,
         }
 
     @staticmethod

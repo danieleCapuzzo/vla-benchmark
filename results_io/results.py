@@ -7,18 +7,25 @@ Output format:
 
 Note:
     if more than one suite is executed, an overall summary file named
-    all_suites.json (one row per suite) will be produced at the run's top level.
+    all_suites.csv (one row per suite) will be produced at the run's top level.
+
+All metric math (latency stats, durations, smoothness) is delegated to `core.metrics` --
+this module only shapes the row/line and handles file I/O.
 """
 
 from __future__ import annotations
 
+import math
 import csv
 import json
 from pathlib import Path
 from typing import Any, Dict, List
 
-import numpy as np
-
+from core.metrics import (
+    aggregate_durations,
+    aggregate_latency,
+    aggregate_smoothness,
+)
 from core.policy_wrapper import PolicyMetadata
 
 SUMMARY_CSV_FIELDS = [
@@ -39,8 +46,18 @@ SUMMARY_CSV_FIELDS = [
     "feedback_hz",
     "vram_peak_gb",  # max consumed VRAM
     "num_params",
-    "mean_steps_success",  # mean number of steps for success
+    "mean_steps_success",  # mean number of steps for successful episodes
+    "mean_steps_all",  # mean number of steps across all episodes
+    "mean_duration_success_s",  # mean wall-clock rollout duration for successful episodes
+    "mean_duration_all_s",  # mean wall-clock rollout duration across all episodes
+    "mean_smoothness",  # mean action jerk across all episodes
+    "mean_succ_smoothness",  # mean action jerk across successful episodes only
 ]
+
+
+def nan_to_none(value: float) -> float | None:
+    """Maps NaN to None (valid JSON `null`); passes any other float through unchanged."""
+    return None if math.isnan(value) else value
 
 
 def write_episodes_jsonl(path: str | Path, episodes: List[Dict[str, Any]]) -> None:
@@ -50,12 +67,13 @@ def write_episodes_jsonl(path: str | Path, episodes: List[Dict[str, Any]]) -> No
         path: Destination file path (typically ".../episodes.jsonl").
         episodes: List of per-episode result dicts as produced by
             `LiberoEvaluator._run_episode` (keys: suite, task_id, trial, success, num_steps,
-            latencies_s, lat_mean_s, is_chunked, chunk_size).
+            latencies_s, lat_mean_s, is_chunked, chunk_size, duration_s, smoothness).
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
         for ep in episodes:
+            ep = {**ep, "smoothness": nan_to_none(ep["smoothness"])}
             f.write(json.dumps(ep) + "\n")
 
 
@@ -78,7 +96,7 @@ def write_summary_csv(
     Returns:
         The row dict that was written, keyed by `SUMMARY_CSV_FIELDS` -- reused by callers
         that aggregate multiple suite runs into a cross-run summary (see
-        `write_all_suites_json`) without re-reading the file back.
+        `write_all_suites_csv`) without re-reading the file back.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -88,31 +106,7 @@ def write_summary_csv(
     success_rate = len(successes) / n_episodes if n_episodes else 0.0
 
     all_latencies_s = [lat for ep in episodes for lat in ep["latencies_s"]]
-    lat_mean_ms = float(np.mean(all_latencies_s) * 1e3) if all_latencies_s else 0.0
-    lat_median_ms = float(np.median(all_latencies_s) * 1e3) if all_latencies_s else 0.0
-
-    # std/var of latency in ms
-    # large values --> inconsistent real-time behavior.
-    lat_std_ms = float(np.std(all_latencies_s) * 1e3) if all_latencies_s else 0.0
-    lat_var_ms2 = float(np.var(all_latencies_s) * 1e6) if all_latencies_s else 0.0
-
-    # 95/99 percentile latencies
-    # very informative metrics for real time
-    lat_p95_ms = (
-        float(np.percentile(all_latencies_s, 95) * 1e3) if all_latencies_s else 0.0
-    )
-    lat_p99_ms = (
-        float(np.percentile(all_latencies_s, 99) * 1e3) if all_latencies_s else 0.0
-    )
-
-    lat_mean_s = lat_mean_ms / 1e3
     chunk_size = episodes[0]["chunk_size"] if episodes else 1
-    effective_aps = (chunk_size / lat_mean_s) if lat_mean_s > 0 else 0.0
-    feedback_hz = (1.0 / lat_mean_s) if lat_mean_s > 0 else 0.0
-
-    mean_steps_success = (
-        float(np.mean([ep["num_steps"] for ep in successes])) if successes else 0.0
-    )
 
     row = {
         "model_id": metadata.model_id,
@@ -122,18 +116,16 @@ def write_summary_csv(
         "seed": seed,
         "success_rate": success_rate,
         "n_episodes": n_episodes,
-        "lat_mean_ms": lat_mean_ms,
-        "lat_median_ms": lat_median_ms,
-        "lat_std_ms": lat_std_ms,
-        "lat_var_ms2": lat_var_ms2,
-        "lat_p95_ms": lat_p95_ms,
-        "lat_p99_ms": lat_p99_ms,
-        "effective_aps": effective_aps,
-        "feedback_hz": feedback_hz,
+        **aggregate_latency(all_latencies_s, chunk_size),
         "vram_peak_gb": vram_peak_gb,
         "num_params": metadata.num_params,
-        "mean_steps_success": mean_steps_success,
+        **aggregate_durations(episodes),
+        **aggregate_smoothness(episodes),
     }
+    # NaN has no valid CSV representation (the literal text "nan" isn't standard and trips
+    # up strict readers); map to None so csv.DictWriter emits an empty cell instead, same
+    # convention as write_episodes_jsonl's NaN -> JSON null.
+    row = {k: (nan_to_none(v) if isinstance(v, float) else v) for k, v in row.items()}
 
     with open(path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=SUMMARY_CSV_FIELDS)
@@ -143,17 +135,19 @@ def write_summary_csv(
     return row
 
 
-def write_all_suites_json(path: str | Path, rows: List[Dict[str, Any]]) -> None:
+def write_all_suites_csv(path: str | Path, rows: List[Dict[str, Any]]) -> None:
     """
     Writes a combined summary with one row per suite, for a multi-suite invocation.
     List of per-suite summary rows (same fields as `summary.csv`, see
     `SUMMARY_CSV_FIELDS`) --> loadable for cross-suite comparison.
 
     Args:
-        path: destination file path (typically ".../all_suites.json").
+        path: destination file path (typically ".../all_suites.csv").
         rows: one summary row dict per suite, as returned by `write_summary_csv`.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as f:
-        json.dump(rows, f, indent=2)
+    with open(path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=SUMMARY_CSV_FIELDS)
+        writer.writeheader()
+        writer.writerows(rows)
