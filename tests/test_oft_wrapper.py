@@ -70,9 +70,19 @@ def _install_fake_oft_modules():
 
 @pytest.fixture
 def fake_oft_modules():
+    """Installs fresh fake experiments.*/prismatic.* modules for this test only.
+
+    Also evicts wrappers.oft_wrapper itself: it does `from experiments.robot.openvla_utils
+    import get_vla_action, ...` at module scope, so once imported it keeps referencing
+    whichever fake-module instance existed at import time. Without this eviction, a test
+    using this fixture a second time (e.g. a different test module also importing
+    OftWrapper) would silently see stale MagicMocks from the first test's fixture instance.
+    """
     saved = {k: sys.modules.get(k) for k in list(sys.modules) if k.startswith(("experiments", "prismatic"))}
+    sys.modules.pop("wrappers.oft_wrapper", None)
     mod = _install_fake_oft_modules()
     yield mod
+    sys.modules.pop("wrappers.oft_wrapper", None)
     for k in list(sys.modules):
         if k.startswith(("experiments", "prismatic")):
             del sys.modules[k]
