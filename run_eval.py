@@ -74,7 +74,7 @@ import wrappers.oft_wrapper  # noqa: E402,F401
 import wrappers.mail_wrapper  # noqa: E402,F401
 from core.evaluator import LiberoEvaluator  # noqa: E402
 from results_io.results import (  # noqa: E402
-    write_all_suites_json,
+    write_all_suites_csv,
     write_episodes_jsonl,
     write_summary_csv,
 )
@@ -148,6 +148,23 @@ def resolve_suites(requested: List[str]) -> List[str]:
     return seen
 
 
+def _resolve_run_dir(
+    output_dir_path: Path, model: str, quant: str, num_cameras: int
+) -> Path:
+    """Builds `results/{model}_{quant}_{ncam}cam/`, appending a progressive numeric suffix
+    to `model` (model2, model3, ...) if that directory already exists, instead of overwriting.
+    """
+    # numbering starts at 2 (bare `model` is the first run, `model2` the first collision)
+    suffix = ""
+    n = 1
+    while True:
+        candidate = output_dir_path / f"{model}{suffix}_{quant}_{num_cameras}cam"
+        if not candidate.exists():
+            return candidate
+        n += 1
+        suffix = str(n)
+
+
 def run_one_suite(
     *,
     model: str,
@@ -171,10 +188,9 @@ def run_one_suite(
         num_cameras: Number of cameras fed to the policy.
         rollouts: Rollouts per task for this run.
         seed: Random seed, recorded in the summary row.
-        run_dir: Top-level directory for this invocation (`results/{model}_{timestamp}/`,
+        run_dir: Top-level directory for this invocation (`results/{model}_{quant}_{ncam}cam/`,
             shared by every suite in this invocation; see `main`). This suite's
-            `episodes.jsonl`/`summary.csv` are written to a `{suite}_{quant}_{ncam}cam/`
-            subfolder within it.
+            `episodes.jsonl`/`summary.csv` are written to a `{suite}/` subfolder within it.
         save_videos: If True, saves an MP4 replay per trial under
             `<suite_dir>/videos/` (see `core.core_utils.write_rollout_video`).
 
@@ -212,7 +228,7 @@ def run_one_suite(
     # `_suppress_noisy_warnings` docstring).
     _suppress_noisy_warnings()
 
-    suite_dir = run_dir / f"{suite}_{quant}_{num_cameras}cam"
+    suite_dir = run_dir / suite
 
     evaluator = LiberoEvaluator(
         task_suite_name=suite_cfg.task_suite_name,
@@ -261,10 +277,9 @@ def main() -> None:
     if not output_dir_path.is_absolute():
         output_dir_path = REPO_ROOT / output_dir_path
 
-    # one shared timestamp for this whole invocation -- every suite run below writes into
-    # the same results/{model}_{timestamp}/ parent, instead of each suite getting its own.
-    timestamp = time.strftime("%Y%m%d-%H%M%S")
-    run_dir = output_dir_path / f"{args.model}_{timestamp}"
+    # results written to results/{model}_{quant}_{ncam}cam/
+    # collisions handled with progressive numbering ie.: {model}<2,3....>
+    run_dir = _resolve_run_dir(output_dir_path, args.model, quant, num_cameras)
 
     # warn of different num rollouts than expected
     if rollouts != FROZEN_ROLLOUTS_PER_TASK:
@@ -292,8 +307,8 @@ def main() -> None:
     ]
 
     if len(suites) > 1:
-        all_suites_path = run_dir / "all_suites.json"
-        write_all_suites_json(all_suites_path, rows)
+        all_suites_path = run_dir / "all_suites.csv"
+        write_all_suites_csv(all_suites_path, rows)
         print(f"Cross-run summary ({len(suites)} suites) written to {all_suites_path}")
 
 
