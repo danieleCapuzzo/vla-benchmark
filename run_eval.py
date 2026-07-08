@@ -12,6 +12,7 @@ explicitly (see `default_config_for`).
 from __future__ import annotations
 
 import argparse
+import gc
 import os
 import sys
 import time
@@ -253,8 +254,12 @@ def run_one_suite(
     print(f"[{suite}] VRAM peak: {vram_peak_gb:.2f} GB")
 
     # free the model before next suite
+    # explicitly call garbage collection
+    # clear cache and sync torch to avoid OOM errors
     del wrapper
+    gc.collect()
     torch.cuda.empty_cache()
+    torch.cuda.synchronize()
 
     return row
 
