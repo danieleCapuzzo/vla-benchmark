@@ -221,6 +221,7 @@ __marimo__/
 # UNWANTED FOLDERS
 .vscode/
 .claude/
+.oft-env/
 old_scripts/
 
 LIBERO/
