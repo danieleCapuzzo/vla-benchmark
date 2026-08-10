@@ -2,9 +2,10 @@
 """
 CLI entrypoint: wires PolicyFactory -> wrapper -> LiberoEvaluator -> results_io.
 Example:
-    python run_eval.py --model oft --suite spatial --quant 8bit --num-cameras 1 --rollouts 20
+    python run_eval.py --model oft --suite spatial --quant 8bit --rollouts 20
     python run_eval.py --model openvla --suite all --quant 8bit  # full benchmark
 
+Camera count is fixed per model (not a CLI parameter): 1 for openvla, 2 for oft and mail.
 Config is auto-selected per --model (config/config_<model>.json) unless --config is given
 explicitly (see `default_config_for`).
 """
@@ -13,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import gc
+import importlib
 import os
 import sys
 import time
@@ -68,12 +70,14 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from config.loader import FROZEN_ROLLOUTS_PER_TASK, RunConfig, load_config  # noqa: E402
 from core.factory import PolicyFactory  # noqa: E402
-
-# trigger wrapper registration using @PolicyFactory.register decorators.
-import wrappers.openvla_wrapper  # noqa: E402,F401
-import wrappers.oft_wrapper  # noqa: E402,F401
-import wrappers.mail_wrapper  # noqa: E402,F401
 from core.evaluator import LiberoEvaluator  # noqa: E402
+
+# lazy factory registration
+_WRAPPER_MODULE_BY_MODEL = {
+    "openvla": "wrappers.openvla_wrapper",
+    "oft": "wrappers.oft_wrapper",
+    "mail": "wrappers.mail_wrapper",
+}
 from results_io.results import (  # noqa: E402
     write_all_suites_csv,
     write_episodes_jsonl,
@@ -85,12 +89,18 @@ _suppress_noisy_warnings()
 
 ALL_SUITES = ["spatial", "object", "goal", "long"]
 
-# per-model default config file (config/config_<model>.json). "mail" has no config yet
-# (wrapper unimplemented); falls back to the OFT config until MaIL's own config lands.
+# per-model default config file (config/config_<model>.json).
 _DEFAULT_CONFIG_BY_MODEL = {
     "openvla": "config_openvla.json",
     "oft": "config_oft.json",
-    "mail": "config_oft.json",
+    "mail": "config_mail.json",
+}
+
+# camera count is fixed per model, not a runtime parameter.
+NUM_CAMERAS_BY_MODEL = {
+    "openvla": 1,
+    "oft": 2,
+    "mail": 2,
 }
 
 
@@ -113,7 +123,6 @@ def parse_args() -> argparse.Namespace:
         help="One or more suites, or 'all' for the full benchmark in one invocation.",
     )
     parser.add_argument("--quant", default=None, choices=["none", "8bit", "4bit"])
-    parser.add_argument("--num-cameras", type=int, default=None, choices=[1, 2])
     parser.add_argument(
         "--rollouts",
         type=int,
@@ -172,7 +181,6 @@ def run_one_suite(
     suite: str,
     cfg: RunConfig,
     quant: str,
-    num_cameras: int,
     rollouts: int,
     seed: int,
     run_dir: Path,
@@ -186,7 +194,6 @@ def run_one_suite(
         suite: Suite name key into `cfg.suites` (e.g. "spatial").
         cfg: Loaded run configuration.
         quant: Quantization mode ("none", "8bit", "4bit").
-        num_cameras: Number of cameras fed to the policy.
         rollouts: Rollouts per task for this run.
         seed: Random seed, recorded in the summary row.
         run_dir: Top-level directory for this invocation (`results/{model}_{quant}_{ncam}cam/`,
@@ -212,6 +219,7 @@ def run_one_suite(
     # isn't inflated by the previous suite's (now-freed) model.
     torch.cuda.reset_peak_memory_stats()
 
+    num_cameras = NUM_CAMERAS_BY_MODEL[model]
     print(
         f"\n\n=== Loading {model} / {suite} ({quant}, {num_cameras}cam) "
         f"-- {suite_cfg.checkpoint} ==="
@@ -222,7 +230,7 @@ def run_one_suite(
         checkpoint=suite_cfg.checkpoint,
         unnorm_key=suite_cfg.unnorm_key,
     )
-    wrapper.load(quant=quant, num_cameras=num_cameras)
+    wrapper.load(quant=quant)
     print(f"[{suite}] Loaded in {time.perf_counter() - load_t0:.1f}s")
     # transformers/accelerate/bitsandbytes internals triggered by wrapper.load() reset the
     # global warnings.filters list as a side effect -- reassert ours (see
@@ -266,12 +274,15 @@ def run_one_suite(
 
 def main() -> None:
     args = parse_args()
+
+    # trigger factory model registration (@PolicyFactory.register)
+    importlib.import_module(_WRAPPER_MODULE_BY_MODEL[args.model])
+
     cfg_path = Path(args.config) if args.config else default_config_for(args.model)
     cfg = load_config(cfg_path)
 
     # default to configuration if not provided
     quant = args.quant if args.quant is not None else cfg.quant
-    num_cameras = args.num_cameras if args.num_cameras is not None else cfg.num_cameras
     rollouts = args.rollouts if args.rollouts is not None else cfg.rollouts_per_task
     seed = args.seed if args.seed is not None else cfg.seed
     output_dir = args.output_dir if args.output_dir is not None else cfg.output_dir
@@ -284,7 +295,9 @@ def main() -> None:
 
     # results written to results/{model}_{quant}_{ncam}cam/
     # collisions handled with progressive numbering ie.: {model}<2,3....>
-    run_dir = _resolve_run_dir(output_dir_path, args.model, quant, num_cameras)
+    run_dir = _resolve_run_dir(
+        output_dir_path, args.model, quant, NUM_CAMERAS_BY_MODEL[args.model]
+    )
 
     # warn of different num rollouts than expected
     if rollouts != FROZEN_ROLLOUTS_PER_TASK:
@@ -302,7 +315,6 @@ def main() -> None:
             suite=suite,
             cfg=cfg,
             quant=quant,
-            num_cameras=num_cameras,
             rollouts=rollouts,
             seed=seed,
             run_dir=run_dir,

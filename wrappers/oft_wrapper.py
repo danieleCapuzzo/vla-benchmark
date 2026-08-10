@@ -7,6 +7,8 @@ Wraps the official inference pipeline and uses official OFT API
 
 from __future__ import annotations
 
+import importlib.metadata
+import json
 import os
 import sys
 import time
@@ -17,6 +19,27 @@ import numpy as np
 import torch
 
 from wrappers.wrapper_utils import OPENVLA_INPUT_RESOLUTION
+
+_OFT_TRANSFORMERS_FORK_URL = "https://github.com/moojink/transformers-openvla-oft.git"
+
+
+def _assert_transformers_fork_installed() -> None:
+    """
+    Checks if the correct (custom) transformers fork is installed. 
+    Needed for bi-directional cross-attention. If the assert fails:
+    pip install --no-deps -e git+https://github.com/moojink/transformers-openvla-oft.git#egg=transformers
+    """
+    dist = importlib.metadata.distribution("transformers")
+    raw = dist.read_text("direct_url.json")
+    url = json.loads(raw)["url"] if raw else None
+    if url != _OFT_TRANSFORMERS_FORK_URL:
+        raise RuntimeError(
+            "OftWrapper requires the openvla-oft transformers fork "
+            f"({_OFT_TRANSFORMERS_FORK_URL}), but the installed transformers "
+            f"is {'PyPI ' + dist.version if url is None else url}. Swap it in with:\n"
+            f"  pip install --no-deps 'transformers @ git+{_OFT_TRANSFORMERS_FORK_URL}'\n"
+            "and swap back to PyPI transformers==4.40.1 when done."
+        )
 
 # patch issue with official OFT harness using package-relative imports
 # that only resolve when openvla-oft/ is on sys.path
@@ -37,6 +60,8 @@ from experiments.robot.openvla_utils import (  # noqa: E402
 )
 from prismatic.vla.constants import NUM_ACTIONS_CHUNK, PROPRIO_DIM  # noqa: E402
 
+# OFT uses agentview + wrist.
+NUM_CAMERAS = 2
 
 @PolicyFactory.register("oft")
 class OftWrapper(PolicyWrapper):
@@ -61,15 +86,13 @@ class OftWrapper(PolicyWrapper):
         self._action_head = None
         self._proprio_projector = None
         self._quant = "none"
-        self._num_cameras = 1
 
-    def load(self, quant: str = "none", num_cameras: int = 1, **kwargs: Any) -> None:
+    def load(self, quant: str = "none", **kwargs: Any) -> None:
         """
         Loads the OFT checkpoint via the official pipeline.
 
         Args:
             quant: quantization out of "none", "8bit", "4bit".
-            num_cameras: 1 (primary, VRAM-constrained) or 2 (ablation, if VRAM permits).
             **kwargs: Unused; present for interface compatibility.
 
         Raises:
@@ -80,12 +103,14 @@ class OftWrapper(PolicyWrapper):
                 f"Unsupported quant '{quant}'. Must be 'none', '8bit', or '4bit'."
             )
 
+        # ensure the correct transformers fork is installed
+        _assert_transformers_fork_installed()
+
         # patch official OFT assumption that cwd == openvla-oft/
         os.chdir(_OFT_REPO_ROOT)
 
         # set env variables and prepare configuration
         self._quant = quant
-        self._num_cameras = num_cameras
         self._num_actions_chunk = NUM_ACTIONS_CHUNK
 
         self._cfg = GenerateConfig(
@@ -93,7 +118,7 @@ class OftWrapper(PolicyWrapper):
             use_l1_regression=True,
             use_diffusion=False,
             use_film=False,
-            num_images_in_input=num_cameras,
+            num_images_in_input=NUM_CAMERAS,
             use_proprio=True,
             load_in_8bit=(quant == "8bit"),
             load_in_4bit=(quant == "4bit"),
@@ -182,12 +207,12 @@ class OftWrapper(PolicyWrapper):
             variant=self._checkpoint,
             num_params=num_params,
             quant=self._quant,
-            num_cameras=self._num_cameras,
+            num_cameras=NUM_CAMERAS,
             action_chunk_size=self._num_actions_chunk,
             attn_impl="sdpa",
             extra={
                 "unnorm_key": self._unnorm_key,
-                "num_images_in_input": self._num_cameras,
+                "num_images_in_input": NUM_CAMERAS,
             },
         )
 

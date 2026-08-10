@@ -44,7 +44,6 @@ def test_load_config_minimal_json_applies_defaults(tmp_path):
 
     assert isinstance(cfg, RunConfig)
     assert cfg.rollouts_per_task == 20
-    assert cfg.num_cameras == 1
     assert cfg.quant == "none"
     assert cfg.seed == 7
     assert cfg.num_steps_wait == 10
@@ -58,7 +57,6 @@ def test_load_config_full_json_parses_suites(tmp_path):
         json.dumps(
             {
                 "rollouts_per_task": 5,
-                "num_cameras": 2,
                 "quant": "8bit",
                 "seed": 42,
                 "num_steps_wait": 3,
@@ -77,7 +75,6 @@ def test_load_config_full_json_parses_suites(tmp_path):
     cfg = load_config(path)
 
     assert cfg.rollouts_per_task == 5
-    assert cfg.num_cameras == 2
     assert cfg.quant == "8bit"
     assert cfg.seed == 42
     assert cfg.num_steps_wait == 3

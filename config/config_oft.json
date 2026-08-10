@@ -1,6 +1,5 @@
 {
   "rollouts_per_task": 20,
-  "num_cameras": 1,
   "quant": "none",
   "seed": 7,
   "num_steps_wait": 10,

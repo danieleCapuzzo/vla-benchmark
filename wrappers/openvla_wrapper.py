@@ -34,6 +34,9 @@ from config.loader import resolve_unnorm_key  # noqa: E402
 from core.factory import PolicyFactory  # noqa: E402
 from core.policy_wrapper import PolicyMetadata, PolicyOutput, PolicyWrapper  # noqa: E402
 
+# OpenVLA uses no wrist-camera
+NUM_CAMERAS = 1
+
 
 @PolicyFactory.register("openvla")
 class OpenVlaWrapper(PolicyWrapper):
@@ -56,35 +59,27 @@ class OpenVlaWrapper(PolicyWrapper):
         self._vla = None
         self._processor = None
         self._quant = "none"
-        self._num_cameras = 1
 
-    def load(self, quant: str = "none", num_cameras: int = 1, **kwargs: Any) -> None:
+    def load(self, quant: str = "none", **kwargs: Any) -> None:
         """
         Loads the OpenVLA checkpoint via `wrapper_utils.load_openvla_model`.
 
         Args:
             quant: quantization out of "none", "8bit", "4bit".
-            num_cameras: must be 1 -- base OpenVLA has no wrist-camera input path.
             **kwargs: Unused; present for interface compatibility.
 
         Raises:
-            ValueError: if `quant` is unsupported, or `num_cameras != 1`.
+            ValueError: if `quant` is unsupported.
         """
         if quant not in ("none", "8bit", "4bit"):
             raise ValueError(
                 f"Unsupported quant '{quant}'. Must be 'none', '8bit', or '4bit'."
-            )
-        if num_cameras != 1:
-            raise ValueError(
-                "Base OpenVLA only supports a single (agentview) camera; "
-                f"got num_cameras={num_cameras}."
             )
 
         # patch official OpenVLA assumption that cwd == openvla/
         os.chdir(_OPENVLA_REPO_ROOT)
 
         self._quant = quant
-        self._num_cameras = num_cameras
 
         torch.cuda.reset_peak_memory_stats()
 
@@ -155,7 +150,7 @@ class OpenVlaWrapper(PolicyWrapper):
             variant=self._checkpoint,
             num_params=num_params,
             quant=self._quant,
-            num_cameras=self._num_cameras,
+            num_cameras=NUM_CAMERAS,
             action_chunk_size=1,
             attn_impl="sdpa",
             extra={"unnorm_key": self._unnorm_key},
