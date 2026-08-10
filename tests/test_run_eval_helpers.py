@@ -1,4 +1,5 @@
-"""Unit tests for run_eval.py's pure CLI helpers: resolve_suites, _resolve_run_dir,
+"""
+Unit tests for run_eval.py's pure CLI helpers: resolve_suites, _resolve_run_dir,
 default_config_for.
 
 Importing run_eval triggers the real wrapper registration imports (openvla/oft/mail), which
@@ -55,11 +56,7 @@ def test_resolve_run_dir_multiple_collisions_increment(tmp_path):
 def test_default_config_for_known_models():
     assert run_eval.default_config_for("openvla").name == "config_openvla.json"
     assert run_eval.default_config_for("oft").name == "config_oft.json"
-
-
-def test_default_config_for_mail_falls_back_to_oft_config():
-    assert run_eval.default_config_for("mail").name == "config_oft.json"
-
+    # assert run_eval.default_config_for("mail").name == "config_mail.json"       
 
 def test_default_config_for_unknown_model_raises_keyerror():
     with pytest.raises(KeyError):

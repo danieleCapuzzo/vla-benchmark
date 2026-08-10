@@ -69,8 +69,8 @@ class PolicyWrapper(ABC):
     """
 
     @abstractmethod
-    def load(self, quant: str = "none", num_cameras: int = 1, **kwargs: Any) -> None:
-        """Loads model weights/checkpoints with the requested quantization and camera config.
+    def load(self, quant: str = "none", **kwargs: Any) -> None:
+        """Loads model weights/checkpoints with the requested quantization.
 
         Called once per run, before any episodes are executed. Must use the loading
         procedure from the original paper / official harness (see the libero-eval skill
@@ -78,7 +78,6 @@ class PolicyWrapper(ABC):
 
         Args:
             quant: Quantization mode, one of "none", "8bit", "4bit".
-            num_cameras: Number of camera inputs to configure the model for (1 or 2).
             **kwargs: Model-specific extra loading parameters (e.g. checkpoint override).
         """
 

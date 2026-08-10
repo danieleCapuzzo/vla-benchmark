@@ -10,7 +10,7 @@ class _DummyWrapper(PolicyWrapper):
     def __init__(self, **kwargs):
         self.kwargs = kwargs
 
-    def load(self, quant="none", num_cameras=1, **kwargs):
+    def load(self, quant="none", **kwargs):
         pass
 
     def reset(self):

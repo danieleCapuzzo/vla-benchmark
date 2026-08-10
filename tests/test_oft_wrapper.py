@@ -103,8 +103,10 @@ def test_oft_wrapper_predict_shape_and_dtype(fake_oft_modules):
     fake_oft_modules.get_vla.return_value = fake_vla
 
     wrapper = OftWrapper(checkpoint="fake/checkpoint", unnorm_key="libero_spatial_no_noops")
-    with patch("torch.cuda.reset_peak_memory_stats"), patch("torch.cuda.synchronize"):
-        wrapper.load(quant="none", num_cameras=1)
+    with patch("torch.cuda.reset_peak_memory_stats"), patch("torch.cuda.synchronize"), patch(
+        "wrappers.oft_wrapper._assert_transformers_fork_installed"
+    ):
+        wrapper.load(quant="none")
 
         observation = {
             "full_image": np.zeros((256, 256, 3), dtype=np.uint8),
@@ -117,3 +119,38 @@ def test_oft_wrapper_predict_shape_and_dtype(fake_oft_modules):
     assert output.actions.dtype == np.float32
     assert output.is_chunked is True
     assert output.raw_latency_s >= 0.0
+
+
+def test_assert_transformers_fork_installed_rejects_pypi_transformers(fake_oft_modules):
+    from wrappers.oft_wrapper import _assert_transformers_fork_installed
+
+    fake_dist = MagicMock()
+    fake_dist.version = "4.40.1"
+    fake_dist.read_text.return_value = None
+    with patch("importlib.metadata.distribution", return_value=fake_dist):
+        with pytest.raises(RuntimeError, match="requires the openvla-oft transformers fork"):
+            _assert_transformers_fork_installed()
+
+
+def test_assert_transformers_fork_installed_accepts_fork(fake_oft_modules):
+    from wrappers.oft_wrapper import _assert_transformers_fork_installed
+
+    fake_dist = MagicMock()
+    fake_dist.version = "4.40.1"
+    fake_dist.read_text.return_value = (
+        '{"url": "https://github.com/moojink/transformers-openvla-oft.git", '
+        '"vcs_info": {"commit_id": "abc123", "vcs": "git"}}'
+    )
+    with patch("importlib.metadata.distribution", return_value=fake_dist):
+        _assert_transformers_fork_installed()  # must not raise
+
+
+def test_assert_transformers_fork_installed_rejects_unrelated_fork(fake_oft_modules):
+    from wrappers.oft_wrapper import _assert_transformers_fork_installed
+
+    fake_dist = MagicMock()
+    fake_dist.version = "4.40.1"
+    fake_dist.read_text.return_value = '{"url": "https://github.com/someone/other-fork.git"}'
+    with patch("importlib.metadata.distribution", return_value=fake_dist):
+        with pytest.raises(RuntimeError, match="requires the openvla-oft transformers fork"):
+            _assert_transformers_fork_installed()
