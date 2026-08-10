@@ -229,3 +229,6 @@ openvla/
 openvla-oft/
 mail/
 datasets/
+
+# Trained model checkpoints
+trained/
