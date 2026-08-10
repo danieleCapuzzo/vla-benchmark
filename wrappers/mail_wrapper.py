@@ -1,41 +1,181 @@
 """
-Adapter for MambaImitationLearning MaIL (see https://github.com/ALRhub/MaIL).
-
-# TODO: implement is according to doc/ARCHITECTURE (PloicyWrapper contract)
-# remember to use a new custom environment for Mamba
+Adapter for MambaImitationLearning MaIL (see https://github.com/ALRhub/MaIL) 
 """
 
 from __future__ import annotations
 
+import time
+from collections import deque
+from pathlib import Path
 from typing import Any, Dict
+
+import cv2
+import numpy as np
+import torch
 
 from core.factory import PolicyFactory
 from core.policy_wrapper import PolicyMetadata, PolicyOutput, PolicyWrapper
+from core.mail_arch import load_checkpoint
+
+IMAGE_SIZE = 128  # MaIL's native training resolution, see core/mail_arch.py
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# all train_mail.py checkpoints are trained as the 2-camera (agentview + wrist) variant.
+NUM_CAMERAS = 2
+
+
+def _to_model_image(image: np.ndarray) -> torch.Tensor:
+    """uint8 HWC (any size) -> float32 CHW in [0, 1] at IMAGE_SIZE, no orientation change"""
+    resized = cv2.resize(image, (IMAGE_SIZE, IMAGE_SIZE), interpolation=cv2.INTER_AREA)
+    tensor = torch.from_numpy(resized).float().permute(2, 0, 1) / 255.0
+    return tensor
 
 
 @PolicyFactory.register("mail")
 class MailWrapper(PolicyWrapper):
-    """Strategy/Adapter skeleton for MaIL. Not implemented yet."""
+    """Adapter pattern: adapts MaIL's DDPM-Mamba policy to the PolicyWrapper contract."""
 
     def __init__(self, checkpoint: str, unnorm_key: str) -> None:
+        """
+        Args:
+            checkpoint: Path to a `train_mail.py` checkpoint (.pt) for the target suite.
+            unnorm_key: Unused but kept for constructor signature parity
+        """
         self._checkpoint = checkpoint
-        self._unnorm_key = unnorm_key
+        self._policy = None
+        self._scaler = None
+        self._meta: Dict[str, Any] = {}
+        self._quant = "none"
 
-    def load(self, quant: str = "none", num_cameras: int = 1, **kwargs: Any) -> None:
-        raise NotImplementedError("MailWrapper.load is not implemented yet")
+        self._agentview_ctx: deque = deque()
+        self._wrist_ctx: deque = deque()
+        self._action_cache: np.ndarray | None = None
+        self._action_counter = 0
+
+    def load(self, quant: str = "none", **kwargs: Any) -> None:
+        """
+        Loads a MambaIL checkpoint.
+        Args:
+            quant: Must be "none" as MaIL has no quantized loading path.
+            **kwargs: Unused; present for interface compatibility.
+
+        Raises:
+            ValueError: if `quant != "none"`, or the checkpoint wasn't trained with the
+                2-camera (agentview + wrist) configuration this wrapper requires.
+        """
+        if quant != "none":
+            raise ValueError(f"MaIL has no quantized loading path; got quant='{quant}'.")
+
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        torch.cuda.reset_peak_memory_stats()
+        checkpoint_path = Path(self._checkpoint)
+        if not checkpoint_path.is_absolute():
+            checkpoint_path = _REPO_ROOT / checkpoint_path
+        self._policy, self._scaler, self._meta = load_checkpoint(
+            checkpoint_path, device=device, use_ema=True
+        )
+
+        ckpt_num_cameras = self._meta["num_cameras"]
+        if ckpt_num_cameras != NUM_CAMERAS:
+            raise ValueError(
+                f"Checkpoint '{self._checkpoint}' was trained with num_cameras="
+                f"{ckpt_num_cameras}; MailWrapper requires num_cameras={NUM_CAMERAS}."
+            )
+
+        self._quant = quant
 
     def reset(self) -> None:
-        raise NotImplementedError("MailWrapper.reset is not implemented yet")
+        """
+        Clears the observation window and forces a fresh model call on the next `predict()``.
+        """
+        self._agentview_ctx.clear()
+        self._wrist_ctx.clear()
+        self._action_cache = None
+        self._action_counter = 0
 
     def predict(
         self, observation: Dict[str, Any], task_description: str
     ) -> PolicyOutput:
-        raise NotImplementedError("MailWrapper.predict is not implemented yet")
+        """
+        Runs one MaIL step with action chunking, the network 
+        is invoked every `action_seq` calls.
+
+        Args:
+            observation: Dict with "raw_obs" (the raw LIBERO env observation dict).
+            task_description: Unused (no language conditioning)
+
+        Returns:
+            PolicyOutput with actions of shape (1, ACTION_DIM), is_chunked=False.
+        """
+        raw_obs = observation["raw_obs"]
+        agentview = _to_model_image(raw_obs["agentview_image"])
+        self._agentview_ctx.append(agentview)
+        arch = self._policy.arch
+        while len(self._agentview_ctx) > arch.obs_seq:
+            self._agentview_ctx.popleft()
+
+        wrist = _to_model_image(raw_obs["robot0_eye_in_hand_image"])
+        self._wrist_ctx.append(wrist)
+        while len(self._wrist_ctx) > arch.obs_seq:
+            self._wrist_ctx.popleft()
+        wrist_seq = torch.stack(list(self._wrist_ctx), dim=0).unsqueeze(0).to(
+            self._policy.device
+        )
+
+        agentview_seq = torch.stack(list(self._agentview_ctx), dim=0).unsqueeze(0).to(
+            self._policy.device
+        )
+
+        latency_s = 0.0
+        if self._action_cache is None or self._action_counter >= len(self._action_cache):
+            torch.cuda.synchronize()
+            t0 = time.perf_counter()
+            normalized_actions = self._policy.predict(agentview_seq, wrist_seq)
+            torch.cuda.synchronize()
+            latency_s = time.perf_counter() - t0
+
+            self._action_cache = (
+                self._scaler.inverse_scale_output(normalized_actions).cpu().numpy()
+            )
+            self._action_counter = 0
+
+        action = self._action_cache[self._action_counter].copy()
+        self._action_counter += 1
+
+        # convert MaIL's raw env-convention gripper (-1=open/+1=close) to the
+        # RLDS convention the evaluator expects
+        action[-1] = (1.0 - action[-1]) / 2.0
+
+        return PolicyOutput(
+            actions=action.reshape(1, -1).astype(np.float32),
+            is_chunked=False,
+            raw_latency_s=latency_s,
+        )
 
     def get_metadata(self) -> PolicyMetadata:
-        raise NotImplementedError("MailWrapper.get_metadata is not implemented yet")
+        """
+        Returns fully-populated metadata for the currently loaded checkpoint.
+        """
+        if self._policy is None:
+            raise RuntimeError("get_metadata() called before load()")
+        num_params = sum(p.numel() for p in self._policy.parameters())
+        return PolicyMetadata(
+            model_id="mail",
+            variant=f"ddpm_encdec_{self._meta.get('suite', '?')}",
+            num_params=num_params,
+            quant=self._quant,
+            num_cameras=NUM_CAMERAS,
+            action_chunk_size=1,
+            attn_impl="n/a",  # Mamba SSM, no attention -- CLAUDE.md's sdpa rule doesn't apply
+            extra={
+                "replan_interval": self._policy.arch.action_seq,
+                "num_demos": self._meta.get("num_demos"),
+                "train_epoch": self._meta.get("epoch"),
+            },
+        )
 
     def get_vram_footprint_gb(self) -> float:
-        raise NotImplementedError(
-            "MailWrapper.get_vram_footprint_gb is not implemented yet"
-        )
+        """
+        Returns peak allocated VRAM (GB) observed since the last reset_peak_memory_stats().
+        """
+        return torch.cuda.max_memory_allocated() / 1e9
