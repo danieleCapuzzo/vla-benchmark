@@ -1,0 +1,2 @@
+model_id,suite,quant,n_cam,seed,success_rate,n_episodes,lat_mean_ms,lat_median_ms,lat_std_ms,lat_var_ms2,lat_p95_ms,lat_p99_ms,effective_aps,feedback_hz,vram_peak_gb,num_params,mean_steps_success,mean_steps_all,mean_duration_success_s,mean_duration_all_s,mean_smoothness,mean_succ_smoothness
+mail,libero_goal,none,2,7,0.06,200,10.873656742529112,0.0,21.776666752926527,474.22321486801553,55.757658497896045,58.648969146452146,91.96538236201572,91.96538236201572,0.296532992,24707911,155.5,291.33,3.5604324573335666,6.053207245535159,0.0753917795792222,0.05823765477786461

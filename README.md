@@ -28,6 +28,7 @@ clone each one into the repo root by hand before continuing:
 
 ```bash
 git clone git@github.com:ALRhub/MaIL.git mail
+git clone git@github.com:lmzpai/roboMamba.git robo_mamba
 git clone git@github.com:openvla/openvla.git
 git clone git@github.com:moojink/openvla-oft.git
 git clone git@github.com:Lifelong-Robot-Learning/LIBERO.git
@@ -117,7 +118,7 @@ Then install the cloned sub-projects as editable installs:
 pip install -e ./openvla --no-deps
 pip install -e ./openvla-oft --no-deps
 pip install -e ./mail --no-deps
-pip install -e ./robo_mamba --no-deps
+# TODO: ROBOMAMBA INSTALL
 ```
 
 Finally, install `libero` from PyPI, also with `--no-deps`:

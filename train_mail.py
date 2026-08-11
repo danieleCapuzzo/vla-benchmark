@@ -172,8 +172,8 @@ def main() -> None:
     optimizer = torch.optim.Adam(policy.parameters(), lr=args.lr, weight_decay=0)
     ema = EmaTracker(policy, decay=args.ema_decay)
 
-    run_name = f"mail_{args.suite}_language" if args.language else f"mail_{args.suite}"
-    run_dir = Path(args.output_dir) / run_name
+    task_name = f"{args.suite}_language" if args.language else args.suite
+    run_dir = Path(args.output_dir) / "mail" / task_name
     run_dir.mkdir(parents=True, exist_ok=True)
     log_path = run_dir / "train_log.csv"
     with open(log_path, "w", newline="") as f:

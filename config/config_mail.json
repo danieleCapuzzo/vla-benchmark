@@ -6,22 +6,22 @@
   "output_dir": "results",
   "suites": {
     "spatial": {
-      "checkpoint": "trained/mail_spatial/best.pt",
+      "checkpoint": "trained/mail/spatial_language/best.pt",
       "unnorm_key": "",
       "task_suite_name": "libero_spatial"
     },
     "object": {
-      "checkpoint": "trained/mail_object/best.pt",
+      "checkpoint": "trained/mail/object/best.pt",
       "unnorm_key": "",
       "task_suite_name": "libero_object"
     },
     "goal": {
-      "checkpoint": "trained/mail_goal/best.pt",
+      "checkpoint": "trained/mail/goal_language/best.pt",
       "unnorm_key": "",
       "task_suite_name": "libero_goal"
     },
     "long": {
-      "checkpoint": "trained/mail_long/best.pt",
+      "checkpoint": "trained/mail/long/best.pt",
       "unnorm_key": "",
       "task_suite_name": "libero_10"
     }
