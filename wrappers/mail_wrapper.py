@@ -105,8 +105,8 @@ class MailWrapper(PolicyWrapper):
 
     def predict(self, observation: Dict[str, Any], task_description: str) -> PolicyOutput:
         """
-        Runs one MaIL step with action chunking, the network 
-        is invoked every `action_seq` calls.
+        Runs one MaIL step with action chunking implemented with an 
+        internal cache, the network is invoked every `action_seq` calls.
 
         Args:
             observation: Dict with "raw_obs" (the raw LIBERO env observation dict).
@@ -176,8 +176,8 @@ class MailWrapper(PolicyWrapper):
             num_params=num_params,
             quant=self._quant,
             num_cameras=NUM_CAMERAS,
-            action_chunk_size=1,
-            attn_impl="n/a",  # Mamba SSM, no attention -- CLAUDE.md's sdpa rule doesn't apply
+            action_chunk_size=self._policy.arch.action_seq,     # NOTE: used to compute effective_aps
+            attn_impl="n/a",                                    # Mamba SSM, no attention
             extra={
                 "replan_interval": self._policy.arch.action_seq,
                 "num_demos": self._meta.get("num_demos"),

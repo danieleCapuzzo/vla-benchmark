@@ -118,8 +118,12 @@ Then install the cloned sub-projects as editable installs:
 pip install -e ./openvla --no-deps
 pip install -e ./openvla-oft --no-deps
 pip install -e ./mail --no-deps
-# TODO: ROBOMAMBA INSTALL
 ```
+
+`robo_mamba/` needs no install step: its `requirements.txt` pins are already satisfied by
+`bench-env` for everything it actually imports (see doc/ROBOMAMBA.md for the version-by-version
+check). Its modules (`model.vision`, `model.llm`, `model.vlm`) are imported directly off
+`sys.path` by `core/robomamba_arch.py`, the same pattern `core/mail_arch.py` uses for `mail/`.
 
 Finally, install `libero` from PyPI, also with `--no-deps`:
 
@@ -154,7 +158,7 @@ automatically if no CUDA device is visible; everything else runs on CPU.
 ### Evaluate a policy
 
 `run_eval.py` wires the policy factory, wrapper, `LiberoEvaluator`, and results I/O
-into one CLI. Camera count is fixed per model (1 for `openvla`, 2 for `oft`/`mail`),
+into one CLI. Camera count is fixed per model (1 for `openvla`/`robomamba`, 2 for `oft`/`mail`),
 and the config is auto-selected as `config/config_<model>.json` unless `--config` is
 given explicitly.
 
@@ -162,10 +166,11 @@ given explicitly.
 python run_eval.py --model oft --suite spatial --quant 8bit --rollouts 20
 python run_eval.py --model openvla --suite all --quant 8bit       # full benchmark
 python run_eval.py --model mail --suite goal --language           # language-conditioned MaIL
+python run_eval.py --model robomamba --suite spatial              # RoboMamba (frozen trunk + head)
 ```
 
 Key flags: 
-- `--model {openvla,oft,mail}`, 
+- `--model {openvla,oft,mail,robomamba}`, 
 - `--suite {spatial,object,goal,long,all}` (accepts multiple), 
 - `--quant {none,8bit,4bit}`, 
 - `--rollouts N`, 
@@ -194,3 +199,20 @@ Trains on 100% of demos per task by default, other important flags:
 - `--num-workers`, 
 - `--amp` (bf16 autocast),
 - `--output-dir` (default `trained/`).
+
+### Train RoboMamba
+
+`train_robomamba.py` trains a small LIBERO action head on top of RoboMamba's frozen
+CLIP+Mamba-2.8B trunk, on a single suite:
+
+```bash
+python train_robomamba.py --suite spatial
+python train_robomamba.py --suite long --num-demos 10
+```
+
+Everything except the head is frozen, so training runs in two stages: (1) one forward pass of
+the trunk over the suite, caching each frame's last-position hidden state to
+`trained/robomamba/<suite>/features_*.pt` (reused on subsequent runs unless `--force-extract`
+is passed); (2) AdamW + L1 loss training of the head on the cached features (seconds/epoch).
+Other flags: `--epochs`, `--batch-size` (stage 2), `--extract-batch-size` (stage 1, tune to fit
+your GPU), `--lr`, `--weight-decay`, `--seed`, `--trunk-checkpoint`, `--output-dir`.
