@@ -27,7 +27,13 @@ import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from core.mail_arch import SUITE_ARCH_CONFIG, MailPolicy, _ensure_mail_importable, save_checkpoint
+from core.mail_arch import (
+    SUITE_ARCH_CONFIG,
+    LanguageMultiTaskDataset,
+    MailPolicy,
+    _ensure_mail_importable,
+    save_checkpoint,
+)
 
 SUITE_TO_DATASET_DIR = {
     "spatial": "libero_spatial",
@@ -48,17 +54,27 @@ OBS_MODALITIES = {
 MAX_LEN_DATA = 520  # mail/config/benchmark_libero_new.yaml; must exceed every demo's length
 
 
+_FROZEN_STATE_DICT_PREFIX = "language_encoder."
+
+
 class EmaTracker:
     """Minimal exponential moving average over a model's parameters, dict-keyed so the
-    shadow can be saved/loaded directly with `nn.Module.load_state_dict`."""
+    shadow can be saved/loaded directly with `nn.Module.load_state_dict`. Skips the frozen
+    CLIP text encoder's weights (when language conditioning is on)."""
 
     def __init__(self, model: torch.nn.Module, decay: float) -> None:
         self.decay = decay
-        self.shadow = copy.deepcopy(model.state_dict())
+        self.shadow = {
+            name: param.clone()
+            for name, param in model.state_dict().items()
+            if not name.startswith(_FROZEN_STATE_DICT_PREFIX)
+        }
 
     @torch.no_grad()
     def update(self, model: torch.nn.Module) -> None:
         for name, param in model.state_dict().items():
+            if name.startswith(_FROZEN_STATE_DICT_PREFIX):
+                continue
             if param.dtype.is_floating_point:
                 self.shadow[name].mul_(self.decay).add_(param, alpha=1 - self.decay)
             else:
@@ -82,6 +98,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--amp", action="store_true", help="bf16 autocast")
+    parser.add_argument(
+        "--language",
+        action="store_true",
+        help="Enable CLIP-based language conditioning.",
+    )
     parser.add_argument(
         "--data-dir", default=None, help="Default: LIBERO/libero/datasets/<task_suite_name>"
     )
@@ -110,7 +131,7 @@ def main() -> None:
         raise FileNotFoundError(f"No .hdf5 files found in {data_dir}")
 
     print(f"[{args.suite}] loading dataset from {data_dir}...")
-    dataset = MultiTaskDataset(
+    dataset_kwargs = dict(
         data_directory=str(data_dir),
         obs_keys="rgb",
         obs_modalities=OBS_MODALITIES,
@@ -126,6 +147,10 @@ def main() -> None:
         num_data=args.num_demos if args.num_demos is not None else 50,
         data_aug=False,
     )
+    if args.language:
+        dataset = LanguageMultiTaskDataset(task_suite_name=dataset_dir_name, **dataset_kwargs)
+    else:
+        dataset = MultiTaskDataset(**dataset_kwargs)
     print(f"[{args.suite}] {len(dataset)} training windows (num_demos={args.num_demos or 'all'})")
     loader = DataLoader(
         dataset,
@@ -139,7 +164,7 @@ def main() -> None:
 
     scaler = ActionScaler(dataset.get_all_actions(), scale_data=True, device=device)
 
-    policy = MailPolicy(arch, num_cameras=2, device=device)
+    policy = MailPolicy(arch, num_cameras=2, device=device, language=args.language)
     num_params = sum(p.numel() for p in policy.parameters())
     print(f"[{args.suite}] policy: {num_params / 1e6:.2f}M params")
     policy.set_action_bounds(scaler.y_bounds_tensor[0], scaler.y_bounds_tensor[1])
@@ -147,7 +172,8 @@ def main() -> None:
     optimizer = torch.optim.Adam(policy.parameters(), lr=args.lr, weight_decay=0)
     ema = EmaTracker(policy, decay=args.ema_decay)
 
-    run_dir = Path(args.output_dir) / f"mail_{args.suite}"
+    run_name = f"mail_{args.suite}_language" if args.language else f"mail_{args.suite}"
+    run_dir = Path(args.output_dir) / run_name
     run_dir.mkdir(parents=True, exist_ok=True)
     log_path = run_dir / "train_log.csv"
     with open(log_path, "w", newline="") as f:
@@ -156,7 +182,7 @@ def main() -> None:
     print(
         f"\n\n=== Training mail / {args.suite} ({device}) -- {num_params / 1e6:.2f}M params ===\n"
         f"epochs={args.epochs}  batch_size={args.batch_size}  lr={args.lr}  "
-        f"ema_decay={args.ema_decay}  amp={args.amp}\n"
+        f"ema_decay={args.ema_decay}  amp={args.amp}  language={args.language}\n"
         f"num_demos={args.num_demos or 'all (50)'}  num_workers={args.num_workers}  seed={args.seed}\n"
         f"data_dir={data_dir}\n" 
         f"output_dir={run_dir}\n"
@@ -170,7 +196,12 @@ def main() -> None:
         batch_bar = tqdm(
             loader, desc=f"[{args.suite}] epoch {epoch + 1}/{args.epochs}", unit="batch"
         )
-        for agentview, wrist, actions, mask in batch_bar:
+        for batch in batch_bar:
+            if args.language:
+                agentview, wrist, actions, mask, language = batch
+            else:
+                agentview, wrist, actions, mask = batch
+                language = None
             agentview = agentview.to(device, non_blocking=True)
             wrist = wrist.to(device, non_blocking=True)
             actions = scaler.scale_output(actions.to(device, non_blocking=True))
@@ -178,7 +209,7 @@ def main() -> None:
 
             optimizer.zero_grad(set_to_none=True)
             with torch.autocast("cuda", dtype=torch.bfloat16, enabled=args.amp):
-                loss = policy.loss(agentview, wrist, actions, mask=mask)
+                loss = policy.loss(agentview, wrist, actions, mask=mask, language=language)
             loss.backward()
             optimizer.step()
             ema.update(policy)
@@ -187,7 +218,6 @@ def main() -> None:
 
         mean_loss = sum(losses) / len(losses)
         epoch_time_s = time.perf_counter() - epoch_t0
-        print(f"[{args.suite}] epoch {epoch + 1}/{args.epochs}  loss={mean_loss:.4f}  ({epoch_time_s:.1f}s)")
         with open(log_path, "a", newline="") as f:
             csv.writer(f).writerow([epoch + 1, mean_loss, epoch_time_s])
 
@@ -198,6 +228,7 @@ def main() -> None:
             "num_demos": args.num_demos,
             "seed": args.seed,
             "epoch": epoch + 1,
+            "language": args.language,
         }
         save_checkpoint(run_dir / "last.pt", policy, scaler, ema.shadow, meta)
         if mean_loss < best_loss:

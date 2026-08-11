@@ -35,13 +35,16 @@ def _to_model_image(image: np.ndarray) -> torch.Tensor:
 class MailWrapper(PolicyWrapper):
     """Adapter pattern: adapts MaIL's DDPM-Mamba policy to the PolicyWrapper contract."""
 
-    def __init__(self, checkpoint: str, unnorm_key: str) -> None:
+    def __init__(self, checkpoint: str, unnorm_key: str, language: bool = False) -> None:
         """
         Args:
             checkpoint: Path to a `train_mail.py` checkpoint (.pt) for the target suite.
             unnorm_key: Unused but kept for constructor signature parity
+            language:   When True, `predict()` feeds `task_description` into the policy.
+                        Must match how the checkpoint was trained; `load()` raises if it doesn't.
         """
         self._checkpoint = checkpoint
+        self._language = language
         self._policy = None
         self._scaler = None
         self._meta: Dict[str, Any] = {}
@@ -82,6 +85,13 @@ class MailWrapper(PolicyWrapper):
                 f"{ckpt_num_cameras}; MailWrapper requires num_cameras={NUM_CAMERAS}."
             )
 
+        ckpt_language = bool(self._meta.get("language", False))
+        if ckpt_language != self._language:
+            raise ValueError(
+                f"Checkpoint '{self._checkpoint}' was trained with language="
+                f"{ckpt_language}; MailWrapper was constructed with language={self._language}."
+            )
+
         self._quant = quant
 
     def reset(self) -> None:
@@ -93,16 +103,15 @@ class MailWrapper(PolicyWrapper):
         self._action_cache = None
         self._action_counter = 0
 
-    def predict(
-        self, observation: Dict[str, Any], task_description: str
-    ) -> PolicyOutput:
+    def predict(self, observation: Dict[str, Any], task_description: str) -> PolicyOutput:
         """
         Runs one MaIL step with action chunking, the network 
         is invoked every `action_seq` calls.
 
         Args:
             observation: Dict with "raw_obs" (the raw LIBERO env observation dict).
-            task_description: Unused (no language conditioning)
+            task_description: Natural-language task instruction. Used only if this
+                checkpoint was trained with `--language` (see `load()`); ignored otherwise.
 
         Returns:
             PolicyOutput with actions of shape (1, ACTION_DIM), is_chunked=False.
@@ -130,7 +139,9 @@ class MailWrapper(PolicyWrapper):
         if self._action_cache is None or self._action_counter >= len(self._action_cache):
             torch.cuda.synchronize()
             t0 = time.perf_counter()
-            normalized_actions = self._policy.predict(agentview_seq, wrist_seq)
+            normalized_actions = self._policy.predict(
+                agentview_seq, wrist_seq, language=task_description if self._language else None
+            )
             torch.cuda.synchronize()
             latency_s = time.perf_counter() - t0
 
@@ -171,6 +182,7 @@ class MailWrapper(PolicyWrapper):
                 "replan_interval": self._policy.arch.action_seq,
                 "num_demos": self._meta.get("num_demos"),
                 "train_epoch": self._meta.get("epoch"),
+                "language": self._language,
             },
         )
 
