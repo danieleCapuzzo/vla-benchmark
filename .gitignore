@@ -224,11 +224,12 @@ __marimo__/
 .oft-env/
 doc/
 
-LIBERO/
+# non-vendored repos
 openvla/
 openvla-oft/
 mail/
-datasets/
+robo_mamba/
+LIBERO/
 
 # Trained model checkpoints
 trained/

@@ -78,3 +78,20 @@ def test_aggregate_latency_single_element_zero_spread():
     assert result["lat_p95_ms"] == pytest.approx(100.0)
     assert result["lat_p99_ms"] == pytest.approx(100.0)
     assert math.isfinite(result["effective_aps"])
+
+
+def test_aggregate_latency_ignores_cache_hit_zeros():
+    # wrappers that internally cache an action chunk (e.g. MaIL) report raw_latency_s=0.0
+    # on steps that reuse the cache instead of calling the model -- those must not drag
+    # lat_median_ms/lat_mean_ms toward zero.
+    latencies_s = [0.1] + [0.0] * 7
+    result = aggregate_latency(latencies_s, chunk_size=1)
+    assert result["lat_mean_ms"] == pytest.approx(100.0)
+    assert result["lat_median_ms"] == pytest.approx(100.0)
+
+
+def test_aggregate_latency_all_zeros_returns_empty_result():
+    result = aggregate_latency([0.0, 0.0, 0.0], chunk_size=1)
+    assert result["lat_mean_ms"] == 0.0
+    assert result["lat_median_ms"] == 0.0
+    assert result["effective_aps"] == 0.0
