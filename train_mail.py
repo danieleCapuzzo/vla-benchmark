@@ -21,11 +21,16 @@ import copy
 import csv
 import sys
 import time
+import warnings
 from pathlib import Path
 
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+
+warnings.filterwarnings(
+    "ignore", category=FutureWarning, message=r"`resume_download` is deprecated.*"
+)
 
 from core.mail_arch import (
     SUITE_ARCH_CONFIG,

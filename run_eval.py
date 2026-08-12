@@ -57,6 +57,11 @@ def _suppress_noisy_warnings() -> None:
         category=UserWarning,
         message=r"MatMul8bitLt: inputs will be cast from .* to float16 during quantization",
     )
+    warnings.filterwarnings(
+        "ignore",
+        category=FutureWarning,
+        message=r"`resume_download` is deprecated.*",
+    )
 
 
 _suppress_noisy_warnings()

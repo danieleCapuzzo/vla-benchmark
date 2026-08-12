@@ -9,10 +9,10 @@ from collections import deque
 from pathlib import Path
 from typing import Any, Dict
 
-import cv2
 import numpy as np
 import torch
 
+from core.core_utils import env_gripper_to_rlds, resize_frame
 from core.factory import PolicyFactory
 from core.policy_wrapper import PolicyMetadata, PolicyOutput, PolicyWrapper
 from core.mail_arch import load_checkpoint
@@ -25,10 +25,11 @@ NUM_CAMERAS = 2
 
 
 def _to_model_image(image: np.ndarray) -> torch.Tensor:
-    """uint8 HWC (any size) -> float32 CHW in [0, 1] at IMAGE_SIZE, no orientation change"""
-    resized = cv2.resize(image, (IMAGE_SIZE, IMAGE_SIZE), interpolation=cv2.INTER_AREA)
-    tensor = torch.from_numpy(resized).float().permute(2, 0, 1) / 255.0
-    return tensor
+    """
+    uint8 HWC (any size) -> float32 CHW in [0, 1] at IMAGE_SIZE.
+    """
+    resized = resize_frame(image, IMAGE_SIZE)
+    return torch.from_numpy(resized).float().permute(2, 0, 1) / 255.0
 
 
 @PolicyFactory.register("mail")
@@ -150,12 +151,12 @@ class MailWrapper(PolicyWrapper):
             )
             self._action_counter = 0
 
-        action = self._action_cache[self._action_counter].copy()
+        action = self._action_cache[self._action_counter]
         self._action_counter += 1
 
         # convert MaIL's raw env-convention gripper (-1=open/+1=close) to the
         # RLDS convention the evaluator expects
-        action[-1] = (1.0 - action[-1]) / 2.0
+        action = env_gripper_to_rlds(action)
 
         return PolicyOutput(
             actions=action.reshape(1, -1).astype(np.float32),

@@ -1,10 +1,13 @@
-"""Utils for evaluating policies in LIBERO simulation environments."""
+"""
+Utils for evaluating policies in LIBERO simulation environments.
+"""
 
 import math
 import os
 from pathlib import Path
 from typing import List
 
+import cv2
 import numpy as np
 from libero.libero import get_libero_path
 from libero.libero.envs import OffScreenRenderEnv
@@ -39,18 +42,42 @@ def get_libero_dummy_action(model_family: str):
 
 def get_libero_image(obs):
     """Extracts third-person image from observations and preprocesses it."""
-    img = obs["agentview_image"]
-    img = img[::-1, ::-1]  # IMPORTANT: rotate 180 degrees to match train preprocessing
-    return img
+    return to_upright(obs["agentview_image"])
 
 
 def get_libero_wrist_image(obs):
     """Extracts wrist camera image from observations and preprocesses it."""
-    img = obs["robot0_eye_in_hand_image"]
-    img = img[::-1, ::-1]  # IMPORTANT: rotate 180 degrees to match train preprocessing
-    return img
+    return to_upright(obs["robot0_eye_in_hand_image"])
 
 
+####################
+# image utilities  #
+####################
+
+def to_upright(image: np.ndarray) -> np.ndarray:
+    """
+    Rotate the LIBERO frame 180 degrees (upside-down -> upright)
+    Args:
+        image: uint8 HWC frame in LIBERO's native orientation.
+    Returns:
+        uint8 HWC copy, rotated 180 degrees.
+    """
+    return np.ascontiguousarray(image[::-1, ::-1])
+
+
+def resize_frame(image: np.ndarray, size: int) -> np.ndarray:
+    """
+    Resizes a uint8 HWC frame to `size` x `size` with INTER_AREA.
+    """
+    if image.shape[0] == size and image.shape[1] == size:
+        return image
+    return cv2.resize(image, (size, size), interpolation=cv2.INTER_AREA)
+
+
+
+###################
+# robot utilities #
+###################
 def quat2axisangle(quat):
     """
     Copied from robosuite: https://github.com/ARISE-Initiative/robosuite/blob/eafb81f54ffc104f905ee48a16bb15f059176ad3/robosuite/utils/transform_utils.py#L490C1-L512C55
@@ -78,9 +105,17 @@ def quat2axisangle(quat):
     return (quat[:3] * 2.0 * math.acos(quat[3])) / den
 
 
-###################
-# robot utilities #
-###################
+# Gripper convention pipeline for a policy trained on raw LIBERO demo actions
+# (LIBERO env/demo convention: -1 = open, +1 = close; RLDS convention: 0 = close, 1 = open):
+#
+#   model output (standardized)
+#     -> denormalize_actions        undo z-score, back to raw LIBERO units
+#     -> env_gripper_to_rlds        raw LIBERO gripper {-1,+1} -> RLDS [0,1]
+#     -> normalize_gripper_action   RLDS [0,1] -> [-1,+1], binarized
+#     -> invert_gripper_action      flip sign to match env's -1=open/+1=close
+#
+# A policy that already outputs an RLDS-native gripper skips env_gripper_to_rlds and
+# denormalize_actions but still goes through the last two steps.
 
 
 def normalize_gripper_action(action: np.ndarray, binarize: bool = True) -> np.ndarray:
@@ -110,7 +145,7 @@ def normalize_gripper_action(action: np.ndarray, binarize: bool = True) -> np.nd
     )
 
     if binarize:
-        # Binarize to -1 or +1
+        # binarize to -1 or +1
         normalized_action[..., -1] = np.sign(normalized_action[..., -1])
 
     return normalized_action
@@ -138,10 +173,46 @@ def invert_gripper_action(action: np.ndarray) -> np.ndarray:
     return inverted_action
 
 
+def env_gripper_to_rlds(action: np.ndarray) -> np.ndarray:
+    """
+    Converts a raw LIBERO-convention gripper command into the RLDS convention the
+    evaluator expects, for policies trained directly on LIBERO demo actions.
+    Args:
+        action: Action array with the gripper command in the last dimension.
+    Returns:
+        A copy with the last dimension remapped (-1 -> 1.0 open, +1 -> 0.0 close).
+    """
+    converted = action.copy()
+    converted[..., -1] = (1.0 - converted[..., -1]) / 2.0
+    return converted
+
+
+def normalize_actions(actions: np.ndarray, mean: np.ndarray, std: np.ndarray) -> np.ndarray:
+    """
+    Per-dimension standardization of an action array: `(actions - mean) / std`.
+    Args:
+        actions: (..., action_dim) raw actions.
+        mean: (action_dim,) per-dimension mean of the training actions.
+        std: (action_dim,) per-dimension std of the training actions.
+    Returns:
+        Standardized actions of the same shape.
+    """
+    return (actions - mean) / std
+
+
+def denormalize_actions(actions: np.ndarray, mean: np.ndarray, std: np.ndarray) -> np.ndarray:
+    """Inverts `normalize_actions`, mapping a model's standardized prediction back into raw
+    LIBERO action units: `actions * std + mean`.
+
+    Must be applied before the gripper convention conversion (`env_gripper_to_rlds`), since
+    that conversion assumes a raw-unit gripper in [-1, +1].
+    """
+    return actions * std + mean
+
+
 ####################
 # video utilities  #
 ####################
-
 
 def write_rollout_video(
     video_dir: str | Path,
