@@ -209,7 +209,9 @@ class LiberoEvaluator:
         )
         smoothness = compute_smoothness(actions_arr)
 
-        lat_mean_s = float(np.mean(latencies_s)) if latencies_s else 0.0
+        # exclude 0.0 latencies due to cache hits
+        real_latencies_s = [lat for lat in latencies_s if lat > 0.0]
+        lat_mean_s = float(np.mean(real_latencies_s)) if real_latencies_s else 0.0
         return {
             "suite": self._task_suite_name,
             "task_id": task_id,

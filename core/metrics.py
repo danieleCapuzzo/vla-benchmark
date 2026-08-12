@@ -18,8 +18,14 @@ def aggregate_latency(
     """Aggregates per-call model latencies into mean/median/std/var/p95/p99 (ms) plus the
     architecture-dependent throughput pair (see doc/ARCHITECTURE.md 5.2): effective actions/s
     scales by `chunk_size` (K=1 closed-loop, K>1 chunked), feedback_hz never does.
+
+    Removes all 0.0 entries due to caching, that would otherwise skim the results.
+    This is the exact case of MambaIL which uses an internal cache, if the action is
+    already in cache (hit) it outputs with 0 latency.
     """
-    if not all_latencies_s:
+    real_latencies_s = [lat for lat in all_latencies_s if lat > 0.0]
+
+    if not real_latencies_s:
         return {
             "lat_mean_ms": 0.0,
             "lat_median_ms": 0.0,
@@ -31,12 +37,12 @@ def aggregate_latency(
             "feedback_hz": 0.0,
         }
 
-    lat_mean_ms = float(np.mean(all_latencies_s) * 1e3)
-    lat_median_ms = float(np.median(all_latencies_s) * 1e3)
-    lat_std_ms = float(np.std(all_latencies_s) * 1e3)
-    lat_var_ms2 = float(np.var(all_latencies_s) * 1e6)
-    lat_p95_ms = float(np.percentile(all_latencies_s, 95) * 1e3)
-    lat_p99_ms = float(np.percentile(all_latencies_s, 99) * 1e3)
+    lat_mean_ms = float(np.mean(real_latencies_s) * 1e3)
+    lat_median_ms = float(np.median(real_latencies_s) * 1e3)
+    lat_std_ms = float(np.std(real_latencies_s) * 1e3)
+    lat_var_ms2 = float(np.var(real_latencies_s) * 1e6)
+    lat_p95_ms = float(np.percentile(real_latencies_s, 95) * 1e3)
+    lat_p99_ms = float(np.percentile(real_latencies_s, 99) * 1e3)
 
     lat_mean_s = lat_mean_ms / 1e3
     effective_aps = (chunk_size / lat_mean_s) if lat_mean_s > 0 else 0.0

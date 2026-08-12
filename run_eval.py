@@ -142,6 +142,11 @@ def parse_args() -> argparse.Namespace:
         help="Save an MP4 replay per trial to <suite_dir>/videos/ (debug aid; off by "
         "default since it writes one file per rollout).",
     )
+    parser.add_argument(
+        "--language",
+        action="store_true",
+        help="MaIL only: use natural language conditioning to solve the tasks.",
+    )
     return parser.parse_args()
 
 
@@ -158,11 +163,24 @@ def resolve_suites(requested: List[str]) -> List[str]:
     return seen
 
 
+def _suite_dir_name(suite: str, language: bool) -> str:
+    """Subfolder name for a suite's results within a run_dir (see `run_one_suite`)."""
+    return f"{suite}_language" if language else suite
+
+
 def _resolve_run_dir(
-    output_dir_path: Path, model: str, quant: str, num_cameras: int
+    output_dir_path: Path,
+    model: str,
+    quant: str,
+    num_cameras: int,
+    suite_dir_names: List[str],
 ) -> Path:
-    """Builds `results/{model}_{quant}_{ncam}cam/`, appending a progressive numeric suffix
-    to `model` (model2, model3, ...) if that directory already exists, instead of overwriting.
+    """Builds `results/{model}_{quant}_{ncam}cam/`, reusing an existing directory of that
+    name as long as none of `suite_dir_names` (the suites about to be run) already exist
+    inside it -- so e.g. evaluating a new suite lands alongside existing ones in the same
+    `mail_none_2cam/` instead of always forking into a `mail_none_2cam2/` sibling. Only
+    appends a progressive numeric suffix to `model` (model2, model3, ...) once a candidate
+    directory already has results for one of `suite_dir_names`, to avoid overwriting them.
     """
     # numbering starts at 2 (bare `model` is the first run, `model2` the first collision)
     suffix = ""
@@ -170,6 +188,8 @@ def _resolve_run_dir(
     while True:
         candidate = output_dir_path / f"{model}{suffix}_{quant}_{num_cameras}cam"
         if not candidate.exists():
+            return candidate
+        if not any((candidate / name).exists() for name in suite_dir_names):
             return candidate
         n += 1
         suffix = str(n)
@@ -185,6 +205,7 @@ def run_one_suite(
     seed: int,
     run_dir: Path,
     save_videos: bool = False,
+    language: bool = False,
 ) -> Dict[str, Any]:
     """
     Runs a full evaluation for a single suite and writes its per-run result files.
@@ -197,10 +218,12 @@ def run_one_suite(
         rollouts: Rollouts per task for this run.
         seed: Random seed, recorded in the summary row.
         run_dir: Top-level directory for this invocation (`results/{model}_{quant}_{ncam}cam/`,
-            shared by every suite in this invocation; see `main`). This suite's
-            `episodes.jsonl`/`summary.csv` are written to a `{suite}/` subfolder within it.
+                 shared by every suite in this invocation; see `main`). This suite's
+                 `episodes.jsonl`/`summary.csv` are written to a `{suite}/` subfolder within it.
         save_videos: If True, saves an MP4 replay per trial under
-            `<suite_dir>/videos/` (see `core.core_utils.write_rollout_video`).
+                     `<suite_dir>/videos/` (see `core.core_utils.write_rollout_video`).
+        language: True means to use language conditioning for the tasks 
+                  (works if the model is trained) with language conditioning.
 
     Returns:
         The aggregated summary row dict for this suite (as written to its `summary.csv`),
@@ -225,10 +248,14 @@ def run_one_suite(
         f"-- {suite_cfg.checkpoint} ==="
     )
     load_t0 = time.perf_counter()
+    model_kwargs: Dict[str, Any] = {}
+    if model == "mail":
+        model_kwargs["language"] = language
     wrapper = PolicyFactory.create(
         model,
         checkpoint=suite_cfg.checkpoint,
         unnorm_key=suite_cfg.unnorm_key,
+        **model_kwargs,
     )
     wrapper.load(quant=quant)
     print(f"[{suite}] Loaded in {time.perf_counter() - load_t0:.1f}s")
@@ -237,7 +264,7 @@ def run_one_suite(
     # `_suppress_noisy_warnings` docstring).
     _suppress_noisy_warnings()
 
-    suite_dir = run_dir / suite
+    suite_dir = run_dir / _suite_dir_name(suite, language)
 
     evaluator = LiberoEvaluator(
         task_suite_name=suite_cfg.task_suite_name,
@@ -293,10 +320,14 @@ def main() -> None:
     if not output_dir_path.is_absolute():
         output_dir_path = REPO_ROOT / output_dir_path
 
-    # results written to results/{model}_{quant}_{ncam}cam/
-    # collisions handled with progressive numbering ie.: {model}<2,3....>
+    suites = resolve_suites(args.suite)
+    suite_dir_names = [_suite_dir_name(suite, args.language) for suite in suites]
+
+    # results written to results/{model}_{quant}_{ncam}cam/, reusing an existing directory
+    # of that name unless it already has results for one of `suites` (collisions handled
+    # with progressive numbering ie.: {model}<2,3....>).
     run_dir = _resolve_run_dir(
-        output_dir_path, args.model, quant, NUM_CAMERAS_BY_MODEL[args.model]
+        output_dir_path, args.model, quant, NUM_CAMERAS_BY_MODEL[args.model], suite_dir_names
     )
 
     # warn of different num rollouts than expected
@@ -306,8 +337,6 @@ def main() -> None:
             f"({FROZEN_ROLLOUTS_PER_TASK}/task, see doc/ARCHITECTURE.md). "
             "Use only for smoke tests, not for reported results."
         )
-
-    suites = resolve_suites(args.suite)
 
     rows = [
         run_one_suite(
@@ -319,6 +348,7 @@ def main() -> None:
             seed=seed,
             run_dir=run_dir,
             save_videos=args.save_videos,
+            language=args.language,
         )
         for suite in suites
     ]

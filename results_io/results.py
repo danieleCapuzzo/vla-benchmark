@@ -106,7 +106,9 @@ def write_summary_csv(
     success_rate = len(successes) / n_episodes if n_episodes else 0.0
 
     all_latencies_s = [lat for ep in episodes for lat in ep["latencies_s"]]
-    chunk_size = episodes[0]["chunk_size"] if episodes else 1
+
+    # used for models with caching (mail)
+    chunk_size = metadata.action_chunk_size
 
     row = {
         "model_id": metadata.model_id,
@@ -122,9 +124,8 @@ def write_summary_csv(
         **aggregate_durations(episodes),
         **aggregate_smoothness(episodes),
     }
-    # NaN has no valid CSV representation (the literal text "nan" isn't standard and trips
-    # up strict readers); map to None so csv.DictWriter emits an empty cell instead, same
-    # convention as write_episodes_jsonl's NaN -> JSON null.
+    
+    # NaN has no valid CSV representation --> use None
     row = {k: (nan_to_none(v) if isinstance(v, float) else v) for k, v in row.items()}
 
     with open(path, "w", newline="") as f:

@@ -1,0 +1,29 @@
+{
+  "rollouts_per_task": 20,
+  "quant": "none",
+  "seed": 7,
+  "num_steps_wait": 10,
+  "output_dir": "results",
+  "suites": {
+    "spatial": {
+      "checkpoint": "trained/mail/spatial_language/best.pt",
+      "unnorm_key": "",
+      "task_suite_name": "libero_spatial"
+    },
+    "object": {
+      "checkpoint": "trained/mail/object/best.pt",
+      "unnorm_key": "",
+      "task_suite_name": "libero_object"
+    },
+    "goal": {
+      "checkpoint": "trained/mail/goal_language/best.pt",
+      "unnorm_key": "",
+      "task_suite_name": "libero_goal"
+    },
+    "long": {
+      "checkpoint": "trained/mail/long/best.pt",
+      "unnorm_key": "",
+      "task_suite_name": "libero_10"
+    }
+  }
+}

@@ -35,22 +35,46 @@ def test_resolve_suites_single_suite_passthrough():
 
 
 def test_resolve_run_dir_fresh_directory(tmp_path):
-    result = run_eval._resolve_run_dir(tmp_path, "oft", "8bit", 1)
+    result = run_eval._resolve_run_dir(tmp_path, "oft", "8bit", 1, ["spatial"])
+    assert result == tmp_path / "oft_8bit_1cam"
+
+
+def test_resolve_run_dir_reuses_existing_dir_for_a_new_suite(tmp_path):
+    """An existing run_dir with results for other suites is reused (not forked into a *2
+    sibling) as long as none of the suites about to be run already have results in it --
+    e.g. oft_8bit_1cam/long,object exist; evaluating spatial should land in oft_8bit_1cam."""
+    (tmp_path / "oft_8bit_1cam" / "long").mkdir(parents=True)
+    (tmp_path / "oft_8bit_1cam" / "object").mkdir(parents=True)
+    result = run_eval._resolve_run_dir(tmp_path, "oft", "8bit", 1, ["spatial"])
     assert result == tmp_path / "oft_8bit_1cam"
 
 
 def test_resolve_run_dir_collision_numbering_starts_at_two(tmp_path):
-    (tmp_path / "oft_8bit_1cam").mkdir()
-    result = run_eval._resolve_run_dir(tmp_path, "oft", "8bit", 1)
+    (tmp_path / "oft_8bit_1cam" / "spatial").mkdir(parents=True)
+    result = run_eval._resolve_run_dir(tmp_path, "oft", "8bit", 1, ["spatial"])
     assert result == tmp_path / "oft2_8bit_1cam"
 
 
 def test_resolve_run_dir_multiple_collisions_increment(tmp_path):
-    (tmp_path / "oft_8bit_1cam").mkdir()
-    (tmp_path / "oft2_8bit_1cam").mkdir()
-    (tmp_path / "oft3_8bit_1cam").mkdir()
-    result = run_eval._resolve_run_dir(tmp_path, "oft", "8bit", 1)
+    (tmp_path / "oft_8bit_1cam" / "spatial").mkdir(parents=True)
+    (tmp_path / "oft2_8bit_1cam" / "spatial").mkdir(parents=True)
+    (tmp_path / "oft3_8bit_1cam" / "spatial").mkdir(parents=True)
+    result = run_eval._resolve_run_dir(tmp_path, "oft", "8bit", 1, ["spatial"])
     assert result == tmp_path / "oft4_8bit_1cam"
+
+
+def test_resolve_run_dir_any_colliding_suite_forces_bump(tmp_path):
+    """If multiple suites are requested in one invocation and any of them already has
+    results in the candidate dir, the whole invocation bumps to a fresh dir (keeps a
+    multi-suite run's results together in one place rather than splitting across dirs)."""
+    (tmp_path / "oft_8bit_1cam" / "object").mkdir(parents=True)
+    result = run_eval._resolve_run_dir(tmp_path, "oft", "8bit", 1, ["spatial", "object"])
+    assert result == tmp_path / "oft2_8bit_1cam"
+
+
+def test_suite_dir_name_language_suffix():
+    assert run_eval._suite_dir_name("spatial", False) == "spatial"
+    assert run_eval._suite_dir_name("spatial", True) == "spatial_language"
 
 
 def test_default_config_for_known_models():

@@ -45,7 +45,7 @@ class PolicyMetadata:
         num_params: Total number of model parameters.
         quant: Quantization mode used ("none" | "8bit" | "4bit").
         num_cameras: Number of camera inputs the model was loaded with.
-        action_chunk_size: Nominal chunk size K (1 for OpenVLA/MaIL, 8 for OFT).
+        action_chunk_size: Nominal chunk-size K (actions-per-real-inference-call) K
         attn_impl: Attention backend in use (must be "sdpa" on this hardware).
         extra: Free-form dict for model-specific details (e.g. unnorm_key).
     """

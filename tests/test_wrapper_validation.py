@@ -53,17 +53,17 @@ def test_oft_wrapper_get_metadata_before_load_raises_runtime_error(fake_oft_modu
 
 
 # # --- MailWrapper: validation raises before any checkpoint load ---
-# def test_mail_wrapper_load_bad_quant_raises_value_error():
-#     from wrappers.mail_wrapper import MailWrapper
+def test_mail_wrapper_load_bad_quant_raises_value_error():
+    from wrappers.mail_wrapper import MailWrapper
 
-#     wrapper = MailWrapper(checkpoint="fake/checkpoint.pt", unnorm_key="")
-#     with pytest.raises(ValueError, match="quantized loading path"):
-#         wrapper.load(quant="8bit")
+    wrapper = MailWrapper(checkpoint="fake/checkpoint.pt", unnorm_key="")
+    with pytest.raises(ValueError, match="quantized loading path"):
+        wrapper.load(quant="8bit")
 
 
-# def test_mail_wrapper_get_metadata_before_load_raises_runtime_error():
-#     from wrappers.mail_wrapper import MailWrapper
+def test_mail_wrapper_get_metadata_before_load_raises_runtime_error():
+    from wrappers.mail_wrapper import MailWrapper
 
-#     wrapper = MailWrapper(checkpoint="fake/checkpoint.pt", unnorm_key="")
-#     with pytest.raises(RuntimeError, match="before load"):
-#         wrapper.get_metadata()
+    wrapper = MailWrapper(checkpoint="fake/checkpoint.pt", unnorm_key="")
+    with pytest.raises(RuntimeError, match="before load"):
+        wrapper.get_metadata()

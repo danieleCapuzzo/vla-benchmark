@@ -222,10 +222,14 @@ __marimo__/
 .vscode/
 .claude/
 .oft-env/
-old_scripts/
+doc/
 
-LIBERO/
+# non-vendored repos
 openvla/
 openvla-oft/
 mail/
-datasets/
+robo_mamba/
+LIBERO/
+
+# Trained model checkpoints
+trained/
