@@ -7,7 +7,8 @@ TASK_MAX_STEPS lookup and the _build_observation staticmethod. The rollout loop 
 import numpy as np
 import pytest
 
-from core.evaluator import TASK_MAX_STEPS, LiberoEvaluator
+from config.constants import DEFAULT_RENDER_RESOLUTION, TASK_MAX_STEPS
+from core.evaluator import LiberoEvaluator
 
 
 def test_init_known_suite_sets_max_steps():
@@ -18,6 +19,16 @@ def test_init_known_suite_sets_max_steps():
 def test_init_unknown_suite_raises_keyerror():
     with pytest.raises(KeyError):
         LiberoEvaluator("libero_does_not_exist")
+
+
+def test_init_default_render_resolution():
+    evaluator = LiberoEvaluator("libero_spatial")
+    assert evaluator._render_resolution == DEFAULT_RENDER_RESOLUTION
+
+
+def test_init_render_resolution_override():
+    evaluator = LiberoEvaluator("libero_spatial", render_resolution=128)
+    assert evaluator._render_resolution == 128
 
 
 def test_build_observation_key_set_and_state_concatenation_order():

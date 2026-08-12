@@ -58,23 +58,6 @@ dependencies = [
     "dlimp @ git+https://github.com/moojink/dlimp_openvla",
 ]
 
-# openvla and openvla-oft are vendored subdirectories of this repo, each with their own
-# build metadata (openvla/pyproject.toml, openvla-oft/pyproject.toml). pip has no
-# portable way to reference a *relative* local path from inside [project.dependencies]
-# (file:// URLs must be absolute), so they are installed as separate editable installs
-# in README.md instead of being listed here.
-#
-# `libero` (github.com/huggingface/lerobot-libero, on PyPI) is deliberately NOT listed
-# here either, even though it's a normal PyPI package: its metadata hard-pins
-# robomimic==0.2.0, which conflicts with robomimic==0.3.0 above (the version LIBERO's
-# code actually runs against in this project). Installing libero in the same resolve as
-# this project is therefore impossible for pip to satisfy. README.md installs it
-# separately with `--no-deps`, after robomimic/robosuite/bddl/egl_probe are already in
-# place from this file, the same way the vendored openvla/openvla-oft installs work.
-# The LIBERO/ subdirectory in this repo is NOT used for this -- it's an older,
-# differently-packaged fork whose editable install is broken (setup.py's package
-# discovery finds nothing to map).
-
 [project.optional-dependencies]
 dev = [
     "pytest>=9.1",

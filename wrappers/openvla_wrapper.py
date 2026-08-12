@@ -11,13 +11,14 @@ from __future__ import annotations
 import os
 import sys
 import time
-from pathlib import Path
 from typing import Any, Dict
 
 import numpy as np
 import torch
 from transformers import AutoProcessor
 
+from config.constants import NUM_CAMERAS_BY_MODEL
+from config.paths import OPENVLA_DIR
 from wrappers.wrapper_utils import (
     OPENVLA_INPUT_RESOLUTION,
     load_openvla_model,
@@ -26,7 +27,7 @@ from wrappers.wrapper_utils import (
 )
 
 # patch issue with the official harness assuming cwd == openvla/ (norm_stats lookup, etc.)
-_OPENVLA_REPO_ROOT = Path(__file__).resolve().parent.parent / "openvla"
+_OPENVLA_REPO_ROOT = OPENVLA_DIR
 if str(_OPENVLA_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_OPENVLA_REPO_ROOT))
 
@@ -35,7 +36,7 @@ from core.factory import PolicyFactory  # noqa: E402
 from core.policy_wrapper import PolicyMetadata, PolicyOutput, PolicyWrapper  # noqa: E402
 
 # OpenVLA uses no wrist-camera
-NUM_CAMERAS = 1
+NUM_CAMERAS = NUM_CAMERAS_BY_MODEL["openvla"]
 
 
 @PolicyFactory.register("openvla")

@@ -22,6 +22,7 @@ from typing import Any, Dict, List
 
 import numpy as np
 
+from config.constants import DEFAULT_RENDER_RESOLUTION, TASK_MAX_STEPS
 from core.core_utils import (
     get_libero_dummy_action,
     get_libero_env,
@@ -35,16 +36,6 @@ from core.metrics import compute_smoothness
 from core.policy_wrapper import PolicyWrapper
 
 
-# LIBERO-generic per-suite step budgets
-TASK_MAX_STEPS: Dict[str, int] = {
-    "libero_spatial": 220,
-    "libero_object": 280,
-    "libero_goal": 300,
-    "libero_10": 520,
-    "libero_90": 400,
-}
-
-
 class LiberoEvaluator:
     """Facade: runs a full suite evaluation for a given PolicyWrapper."""
 
@@ -53,6 +44,7 @@ class LiberoEvaluator:
         task_suite_name: str,
         num_steps_wait: int = 10,
         video_dir: Path | None = None,
+        render_resolution: int = DEFAULT_RENDER_RESOLUTION,
     ) -> None:
         """Creates the evaluator for one LIBERO task suite.
 
@@ -64,11 +56,17 @@ class LiberoEvaluator:
                 directory (debug aid) -- see `core.core_utils.write_rollout_video`.
                 If None (default), no video is recorded/written (avoids the per-step
                 frame-accumulation cost when not debugging).
+            render_resolution: Square camera resolution the LIBERO env renders at. Should
+                match the resolution each model was trained on (see
+                config.constants.RENDER_RESOLUTION_BY_MODEL) -- e.g. 256 for OpenVLA/OFT
+                (trained on re-rendered 256px frames), 128 for MaIL (trained on the native
+                LIBERO hdf5 demos, themselves rendered at 128).
         """
         self._task_suite_name = task_suite_name
         self._num_steps_wait = num_steps_wait
         self._max_steps = TASK_MAX_STEPS[task_suite_name]
         self._video_dir = video_dir
+        self._render_resolution = render_resolution
 
     def run(
         self, wrapper: PolicyWrapper, num_rollouts_per_task: int
@@ -100,7 +98,7 @@ class LiberoEvaluator:
             task = task_suite.get_task(task_id)
             initial_states = task_suite.get_task_init_states(task_id)
             env, task_description = get_libero_env(
-                task, model_family="openvla", resolution=256
+                task, model_family="openvla", resolution=self._render_resolution
             )
 
             print(

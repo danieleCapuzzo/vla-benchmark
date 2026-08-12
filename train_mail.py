@@ -32,6 +32,8 @@ warnings.filterwarnings(
     "ignore", category=FutureWarning, message=r"`resume_download` is deprecated.*"
 )
 
+from config.constants import SUITE_TO_DATASET_DIR
+from config.paths import LIBERO_DATASETS
 from core.mail_arch import (
     SUITE_ARCH_CONFIG,
     LanguageMultiTaskDataset,
@@ -39,13 +41,6 @@ from core.mail_arch import (
     _ensure_mail_importable,
     save_checkpoint,
 )
-
-SUITE_TO_DATASET_DIR = {
-    "spatial": "libero_spatial",
-    "object": "libero_object",
-    "goal": "libero_goal",
-    "long": "libero_10",
-}
 
 OBS_MODALITIES = {
     "obs": {
@@ -109,7 +104,7 @@ def parse_args() -> argparse.Namespace:
         help="Enable CLIP-based language conditioning.",
     )
     parser.add_argument(
-        "--data-dir", default=None, help="Default: LIBERO/libero/datasets/<task_suite_name>"
+        "--data-dir", default=None, help="Default: external/LIBERO/libero/datasets/<task_suite_name>"
     )
     parser.add_argument("--output-dir", default="trained")
     return parser.parse_args()
@@ -124,11 +119,7 @@ def main() -> None:
     from dataset.multi_task_dataset_aug import MultiTaskDataset
 
     dataset_dir_name = SUITE_TO_DATASET_DIR[args.suite]
-    data_dir = (
-        Path(args.data_dir)
-        if args.data_dir
-        else Path("LIBERO/libero/datasets") / dataset_dir_name
-    )
+    data_dir = Path(args.data_dir) if args.data_dir else LIBERO_DATASETS / dataset_dir_name
     arch = SUITE_ARCH_CONFIG[args.suite]
     device = "cuda" if torch.cuda.is_available() else "cpu"
 

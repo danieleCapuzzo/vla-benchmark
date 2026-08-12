@@ -24,14 +24,16 @@ architecture — older/more common GPUs are more likely to find a matching wheel
 ### 0. Clone the sub-projects
 
 This repo doesn't vendor `mail`, `openvla`, `openvla-oft`, or `LIBERO` as submodules —
-clone each one into the repo root by hand before continuing:
+clone each one into `external/` by hand before continuing (see `config/paths.py` for the
+exact expected layout):
 
 ```bash
-git clone git@github.com:ALRhub/MaIL.git mail
-git clone git@github.com:lmzpai/roboMamba.git robo_mamba
-git clone git@github.com:openvla/openvla.git
-git clone git@github.com:moojink/openvla-oft.git
-git clone git@github.com:Lifelong-Robot-Learning/LIBERO.git
+mkdir -p external
+git clone git@github.com:ALRhub/MaIL.git external/mail
+git clone git@github.com:lmzpai/roboMamba.git external/robo_mamba
+git clone git@github.com:openvla/openvla.git external/openvla
+git clone git@github.com:moojink/openvla-oft.git external/openvla-oft
+git clone git@github.com:Lifelong-Robot-Learning/LIBERO.git external/LIBERO
 ```
 
 ### 1. Create the environment
@@ -115,15 +117,20 @@ pip install -e .
 Then install the cloned sub-projects as editable installs:
 
 ```bash
-pip install -e ./openvla --no-deps
-pip install -e ./openvla-oft --no-deps
-pip install -e ./mail --no-deps
+pip install -e ./external/openvla --no-deps
+pip install -e ./external/openvla-oft --no-deps
+pip install -e ./external/mail --no-deps
 ```
 
-`robo_mamba/` needs no install step: its `requirements.txt` pins are already satisfied by
-`bench-env` for everything it actually imports (see doc/ROBOMAMBA.md for the version-by-version
-check). Its modules (`model.vision`, `model.llm`, `model.vlm`) are imported directly off
-`sys.path` by `core/robomamba_arch.py`, the same pattern `core/mail_arch.py` uses for `mail/`.
+`external/robo_mamba/` needs no install step: its `requirements.txt` pins are already satisfied
+by `bench-env` for everything it actually imports (see doc/ROBOMAMBA.md for the
+version-by-version check). Its modules (`model.vision`, `model.llm`, `model.vlm`) are imported
+directly off `sys.path` by `core/robomamba_arch.py`, the same pattern `core/mail_arch.py` uses
+for `external/mail/`.
+
+If you ever move the `external/` layout, both editable installs must be re-run — their finder
+modules (`site-packages/__editable___openvla*`) hardcode the absolute path they were installed
+from.
 
 Finally, install `libero` from PyPI, also with `--no-deps`:
 
@@ -158,9 +165,9 @@ automatically if no CUDA device is visible; everything else runs on CPU.
 ### Evaluate a policy
 
 `run_eval.py` wires the policy factory, wrapper, `LiberoEvaluator`, and results I/O
-into one CLI. Camera count is fixed per model (1 for `openvla`/`robomamba`, 2 for `oft`/`mail`),
-and the config is auto-selected as `config/config_<model>.json` unless `--config` is
-given explicitly.
+into one CLI. Camera count and render resolution are fixed per model (see
+`config/constants.py` `NUM_CAMERAS_BY_MODEL` / `RENDER_RESOLUTION_BY_MODEL`), and the config
+is auto-selected as `config/config_<model>.json` unless `--config` is given explicitly.
 
 ```bash
 python run_eval.py --model oft --suite spatial --quant 8bit --rollouts 20
