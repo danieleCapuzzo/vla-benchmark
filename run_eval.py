@@ -82,6 +82,7 @@ _WRAPPER_MODULE_BY_MODEL = {
     "openvla": "wrappers.openvla_wrapper",
     "oft": "wrappers.oft_wrapper",
     "mail": "wrappers.mail_wrapper",
+    "robomamba": "wrappers.robomamba_wrapper",
 }
 from results_io.results import (  # noqa: E402
     write_all_suites_csv,
@@ -99,6 +100,7 @@ _DEFAULT_CONFIG_BY_MODEL = {
     "openvla": "config_openvla.json",
     "oft": "config_oft.json",
     "mail": "config_mail.json",
+    "robomamba": "config_robomamba.json",
 }
 
 # camera count is fixed per model, not a runtime parameter.
@@ -106,6 +108,7 @@ NUM_CAMERAS_BY_MODEL = {
     "openvla": 1,
     "oft": 2,
     "mail": 2,
+    "robomamba": 1,
 }
 
 
@@ -119,7 +122,7 @@ def parse_args() -> argparse.Namespace:
     Parses keyboard arguments
     """
     parser = argparse.ArgumentParser(description="VLA-on-LIBERO testbench CLI")
-    parser.add_argument("--model", required=True, choices=["openvla", "oft", "mail"])
+    parser.add_argument("--model", required=True, choices=["openvla", "oft", "mail", "robomamba"])
     parser.add_argument(
         "--suite",
         required=True,

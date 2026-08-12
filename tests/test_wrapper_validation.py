@@ -67,3 +67,20 @@ def test_mail_wrapper_get_metadata_before_load_raises_runtime_error():
     wrapper = MailWrapper(checkpoint="fake/checkpoint.pt", unnorm_key="")
     with pytest.raises(RuntimeError, match="before load"):
         wrapper.get_metadata()
+
+
+# --- RoboMambaWrapper: validation raises before any checkpoint/trunk load ---
+def test_robomamba_wrapper_load_bad_quant_raises_value_error():
+    from wrappers.robomamba_wrapper import RoboMambaWrapper
+
+    wrapper = RoboMambaWrapper(checkpoint="fake/checkpoint.pt", unnorm_key="")
+    with pytest.raises(ValueError, match="quantized loading path"):
+        wrapper.load(quant="8bit")
+
+
+def test_robomamba_wrapper_get_metadata_before_load_raises_runtime_error():
+    from wrappers.robomamba_wrapper import RoboMambaWrapper
+
+    wrapper = RoboMambaWrapper(checkpoint="fake/checkpoint.pt", unnorm_key="")
+    with pytest.raises(RuntimeError, match="before load"):
+        wrapper.get_metadata()
