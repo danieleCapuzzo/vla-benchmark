@@ -225,11 +225,7 @@ __marimo__/
 doc/
 
 # non-vendored repos
-openvla/
-openvla-oft/
-mail/
-robo_mamba/
-LIBERO/
+external/
 
 # Trained model checkpoints
 trained/

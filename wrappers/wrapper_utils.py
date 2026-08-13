@@ -16,8 +16,7 @@ import numpy as np
 import torch
 from PIL import Image
 
-# mandatory input resolution (resize target) for OpenVLA-family vision backbones.
-OPENVLA_INPUT_RESOLUTION = 224
+from config.constants import OPENVLA_INPUT_RESOLUTION  # noqa: F401 (re-exported)
 
 # attention backend forced on Blackwell/sm_120 (flash-attn is not usable, see CLAUDE.md).
 ATTN_IMPL = "sdpa"

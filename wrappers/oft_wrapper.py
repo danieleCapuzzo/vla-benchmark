@@ -12,12 +12,13 @@ import json
 import os
 import sys
 import time
-from pathlib import Path
 from typing import Any, Dict
 
 import numpy as np
 import torch
 
+from config.constants import NUM_CAMERAS_BY_MODEL
+from config.paths import OPENVLA_OFT_DIR
 from wrappers.wrapper_utils import OPENVLA_INPUT_RESOLUTION
 
 _OFT_TRANSFORMERS_FORK_URL = "https://github.com/moojink/transformers-openvla-oft.git"
@@ -43,7 +44,7 @@ def _assert_transformers_fork_installed() -> None:
 
 # patch issue with official OFT harness using package-relative imports
 # that only resolve when openvla-oft/ is on sys.path
-_OFT_REPO_ROOT = Path(__file__).resolve().parent.parent / "openvla-oft"
+_OFT_REPO_ROOT = OPENVLA_OFT_DIR
 if str(_OFT_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_OFT_REPO_ROOT))
 
@@ -61,7 +62,7 @@ from experiments.robot.openvla_utils import (  # noqa: E402
 from prismatic.vla.constants import NUM_ACTIONS_CHUNK, PROPRIO_DIM  # noqa: E402
 
 # OFT uses agentview + wrist.
-NUM_CAMERAS = 2
+NUM_CAMERAS = NUM_CAMERAS_BY_MODEL["oft"]
 
 @PolicyFactory.register("oft")
 class OftWrapper(PolicyWrapper):

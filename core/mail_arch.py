@@ -11,11 +11,12 @@ import os
 import sys
 import warnings
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Dict, List, Sequence
 
 import torch
 import torch.nn as nn
+
+from config.paths import MAIL_DIR
 
 warnings.filterwarnings(
     "ignore",
@@ -27,9 +28,6 @@ warnings.filterwarnings(
     message=r"Arguments other than a weight enum or `None` for 'weights' are deprecated.*",
     category=UserWarning,
 )
-
-_MAIL_REPO_ROOT = Path(__file__).resolve().parent.parent / "mail"
-
 
 def _install_mamba_block_shim() -> None:
     """mamba_ssm 2.x moved `Block` and added a required `mlp_cls` arg; mail/'s mamba.py
@@ -60,8 +58,8 @@ def _install_mamba_block_shim() -> None:
 
 
 def _ensure_mail_importable() -> None:
-    if str(_MAIL_REPO_ROOT) not in sys.path:
-        sys.path.insert(0, str(_MAIL_REPO_ROOT))
+    if str(MAIL_DIR) not in sys.path:
+        sys.path.insert(0, str(MAIL_DIR))
     _install_mamba_block_shim()
 
 
@@ -397,7 +395,7 @@ def _load_demo_language_embeddings(
     import h5py
     import numpy as np
 
-    pkl_path = _MAIL_REPO_ROOT / "task_embeddings" / f"{task_suite_name}.pkl"
+    pkl_path = MAIL_DIR / "task_embeddings" / f"{task_suite_name}.pkl"
     with open(pkl_path, "rb") as f:
         embedding_by_task_name: Dict[str, torch.Tensor] = pickle.load(f)
 

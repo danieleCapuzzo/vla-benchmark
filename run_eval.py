@@ -4,10 +4,6 @@ CLI entrypoint: wires PolicyFactory -> wrapper -> LiberoEvaluator -> results_io.
 Example:
     python run_eval.py --model oft --suite spatial --quant 8bit --rollouts 20
     python run_eval.py --model openvla --suite all --quant 8bit  # full benchmark
-
-Camera count is fixed per model (not a CLI parameter): 1 for openvla, 2 for oft and mail.
-Config is auto-selected per --model (config/config_<model>.json) unless --config is given
-explicitly (see `default_config_for`).
 """
 
 from __future__ import annotations
@@ -73,6 +69,7 @@ import torch  # noqa: E402
 REPO_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(REPO_ROOT))
 
+from config.constants import ALL_SUITES, NUM_CAMERAS_BY_MODEL, RENDER_RESOLUTION_BY_MODEL  # noqa: E402
 from config.loader import FROZEN_ROLLOUTS_PER_TASK, RunConfig, load_config  # noqa: E402
 from core.factory import PolicyFactory  # noqa: E402
 from core.evaluator import LiberoEvaluator  # noqa: E402
@@ -92,8 +89,6 @@ from results_io.results import (  # noqa: E402
 
 # kill warnings
 _suppress_noisy_warnings()
-
-ALL_SUITES = ["spatial", "object", "goal", "long"]
 
 # per-model default config file (config/config_<model>.json).
 _DEFAULT_CONFIG_BY_MODEL = {
@@ -251,9 +246,10 @@ def run_one_suite(
     torch.cuda.reset_peak_memory_stats()
 
     num_cameras = NUM_CAMERAS_BY_MODEL[model]
+    render_resolution = RENDER_RESOLUTION_BY_MODEL[model]
     print(
-        f"\n\n=== Loading {model} / {suite} ({quant}, {num_cameras}cam) "
-        f"-- {suite_cfg.checkpoint} ==="
+        f"\n\n=== Loading {model} / {suite} ({quant}, {num_cameras}cam, "
+        f"render={render_resolution}px) -- {suite_cfg.checkpoint} ==="
     )
     load_t0 = time.perf_counter()
     model_kwargs: Dict[str, Any] = {}
@@ -278,6 +274,7 @@ def run_one_suite(
         task_suite_name=suite_cfg.task_suite_name,
         num_steps_wait=cfg.num_steps_wait,
         video_dir=(suite_dir / "videos") if save_videos else None,
+        render_resolution=render_resolution,
     )
     episodes = evaluator.run(wrapper, num_rollouts_per_task=rollouts)
 

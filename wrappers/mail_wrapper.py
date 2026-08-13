@@ -12,16 +12,18 @@ from typing import Any, Dict
 import numpy as np
 import torch
 
+from config.constants import MAIL_IMAGE_SIZE, NUM_CAMERAS_BY_MODEL
+from config.paths import REPO_ROOT
 from core.core_utils import env_gripper_to_rlds, resize_frame
 from core.factory import PolicyFactory
 from core.policy_wrapper import PolicyMetadata, PolicyOutput, PolicyWrapper
 from core.mail_arch import load_checkpoint
 
-IMAGE_SIZE = 128  # MaIL's native training resolution, see core/mail_arch.py
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+IMAGE_SIZE = MAIL_IMAGE_SIZE  # MaIL's native training resolution, see core/mail_arch.py
+_REPO_ROOT = REPO_ROOT
 
 # all train_mail.py checkpoints are trained as the 2-camera (agentview + wrist) variant.
-NUM_CAMERAS = 2
+NUM_CAMERAS = NUM_CAMERAS_BY_MODEL["mail"]
 
 
 def _to_model_image(image: np.ndarray) -> torch.Tensor:
