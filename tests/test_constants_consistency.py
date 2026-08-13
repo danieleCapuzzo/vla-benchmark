@@ -14,21 +14,23 @@ from config.constants import NUM_CAMERAS_BY_MODEL, RENDER_RESOLUTION_BY_MODEL
 
 
 def test_num_cameras_by_model_covers_every_wrapper():
-    assert set(NUM_CAMERAS_BY_MODEL) == {"openvla", "oft", "mail"}
+    assert set(NUM_CAMERAS_BY_MODEL) == {"openvla", "oft", "mail", "robomamba"}
 
 
 def test_render_resolution_by_model_covers_every_wrapper():
-    assert set(RENDER_RESOLUTION_BY_MODEL) == {"openvla", "oft", "mail"}
+    assert set(RENDER_RESOLUTION_BY_MODEL) == {"openvla", "oft", "mail", "robomamba"}
 
 
 def test_wrapper_num_cameras_is_the_same_object_as_constants():
     from wrappers.mail_wrapper import NUM_CAMERAS as mail_cams
     from wrappers.openvla_wrapper import NUM_CAMERAS as openvla_cams
     from wrappers.oft_wrapper import NUM_CAMERAS as oft_cams
+    from wrappers.robomamba_wrapper import NUM_CAMERAS as robomamba_cams
 
     assert openvla_cams == NUM_CAMERAS_BY_MODEL["openvla"]
     assert oft_cams == NUM_CAMERAS_BY_MODEL["oft"]
     assert mail_cams == NUM_CAMERAS_BY_MODEL["mail"]
+    assert robomamba_cams == NUM_CAMERAS_BY_MODEL["robomamba"]
 
 
 def test_run_eval_num_cameras_by_model_is_the_shared_dict():
@@ -43,3 +45,9 @@ def test_mail_trained_at_128_openvla_family_at_256():
     assert RENDER_RESOLUTION_BY_MODEL["mail"] == 128
     assert RENDER_RESOLUTION_BY_MODEL["openvla"] == 256
     assert RENDER_RESOLUTION_BY_MODEL["oft"] == 256
+
+
+def test_robomamba_trained_at_256_regen_renders():
+    # RoboMamba trains on datasets/libero_*_regen (256px live renders) and resizes to CLIP's
+    # native 224, so eval must render at 256 too -- see doc/ROBOMAMBA.md.
+    assert RENDER_RESOLUTION_BY_MODEL["robomamba"] == 256

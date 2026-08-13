@@ -108,8 +108,8 @@ def quat2axisangle(quat):
 # Gripper convention pipeline for a policy trained on raw LIBERO demo actions
 # (LIBERO env/demo convention: -1 = open, +1 = close; RLDS convention: 0 = close, 1 = open):
 #
-#   model output (standardized)
-#     -> denormalize_actions        undo z-score, back to raw LIBERO units
+#   model output (bounds-normalized)
+#     -> denormalize_actions        undo [-1,1] bounds scaling, back to raw LIBERO units
 #     -> env_gripper_to_rlds        raw LIBERO gripper {-1,+1} -> RLDS [0,1]
 #     -> normalize_gripper_action   RLDS [0,1] -> [-1,+1], binarized
 #     -> invert_gripper_action      flip sign to match env's -1=open/+1=close
@@ -187,27 +187,35 @@ def env_gripper_to_rlds(action: np.ndarray) -> np.ndarray:
     return converted
 
 
-def normalize_actions(actions: np.ndarray, mean: np.ndarray, std: np.ndarray) -> np.ndarray:
+def normalize_actions(actions: np.ndarray, q01: np.ndarray, q99: np.ndarray) -> np.ndarray:
     """
-    Per-dimension standardization of an action array: `(actions - mean) / std`.
+    Per-dimension bounds normalization of an action array into [-1, 1], same scheme as
+    OpenVLA-OFT's BOUNDS_Q99 (see external/openvla-oft's `_unnormalize_actions`): the 1st/99th
+    percentiles are used instead of true min/max so a handful of outlier demo actions don't
+    compress the rest of the range.
+    Works on both np.ndarray (eval, on CPU) and torch.Tensor (training, possibly on GPU) --
+    uses the `.clip()` method rather than `np.clip()` so a CUDA tensor input isn't forced
+    through a numpy round-trip.
     Args:
         actions: (..., action_dim) raw actions.
-        mean: (action_dim,) per-dimension mean of the training actions.
-        std: (action_dim,) per-dimension std of the training actions.
+        q01: (action_dim,) per-dimension 1st percentile of the training actions.
+        q99: (action_dim,) per-dimension 99th percentile of the training actions.
     Returns:
-        Standardized actions of the same shape.
+        Normalized actions of the same shape, clipped to [-1, 1] (values outside [q01, q99]
+        saturate at the boundary).
     """
-    return (actions - mean) / std
+    normalized = 2 * (actions - q01) / (q99 - q01 + 1e-8) - 1
+    return normalized.clip(-1.0, 1.0)
 
 
-def denormalize_actions(actions: np.ndarray, mean: np.ndarray, std: np.ndarray) -> np.ndarray:
-    """Inverts `normalize_actions`, mapping a model's standardized prediction back into raw
-    LIBERO action units: `actions * std + mean`.
+def denormalize_actions(actions: np.ndarray, q01: np.ndarray, q99: np.ndarray) -> np.ndarray:
+    """Inverts `normalize_actions`, mapping a model's [-1, 1] bounds-normalized prediction back
+    into raw LIBERO action units.
 
     Must be applied before the gripper convention conversion (`env_gripper_to_rlds`), since
     that conversion assumes a raw-unit gripper in [-1, +1].
     """
-    return actions * std + mean
+    return 0.5 * (actions + 1) * (q99 - q01 + 1e-8) + q01
 
 
 ####################
