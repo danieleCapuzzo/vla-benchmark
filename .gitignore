@@ -229,3 +229,6 @@ external/
 
 # Trained model checkpoints
 trained/
+
+# LIBERO datasets (and HF download cache)
+datasets/

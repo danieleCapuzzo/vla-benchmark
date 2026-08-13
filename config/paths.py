@@ -18,5 +18,5 @@ MAIL_DIR = EXTERNAL / "mail"
 ROBOMAMBA_DIR = EXTERNAL / "robo_mamba"
 ROBOMAMBA_SRC = ROBOMAMBA_DIR / "src"
 
-LIBERO_DATASETS = LIBERO_DIR / "libero" / "datasets"
+LIBERO_DATASETS = REPO_ROOT / "datasets"
 TRAINED_DIR = REPO_ROOT / "trained"

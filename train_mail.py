@@ -104,7 +104,7 @@ def parse_args() -> argparse.Namespace:
         help="Enable CLIP-based language conditioning.",
     )
     parser.add_argument(
-        "--data-dir", default=None, help="Default: external/LIBERO/libero/datasets/<task_suite_name>"
+        "--data-dir", default=None, help=f"Default: {LIBERO_DATASETS}"
     )
     parser.add_argument("--output-dir", default="trained")
     return parser.parse_args()
