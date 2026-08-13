@@ -12,12 +12,12 @@ from typing import Any, Dict
 import numpy as np
 import torch
 
+from config.constants import NUM_CAMERAS_BY_MODEL
 from core.core_utils import denormalize_actions, env_gripper_to_rlds
 from core.factory import PolicyFactory
 from core.policy_wrapper import PolicyMetadata, PolicyOutput, PolicyWrapper
 from core.robomamba_arch import (
     HIDDEN_DIM,
-    NUM_CAMERAS,
     PROMPT_TEMPLATE,
     build_trunk,
     encode_batch,
@@ -26,6 +26,7 @@ from core.robomamba_arch import (
 )
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
+NUM_CAMERAS = NUM_CAMERAS_BY_MODEL["robomamba"]
 
 
 def _resolve(path: str | Path) -> Path:
@@ -49,9 +50,9 @@ class RoboMambaWrapper(PolicyWrapper):
         self._head = None
         self._meta: Dict[str, Any] = {}
         self._quant = "none"
-        # per-dim action stats; None means the head predicts raw actions
-        self._action_mean: np.ndarray | None = None
-        self._action_std: np.ndarray | None = None
+        # per-dim action bounds (q01/q99); None means the head predicts raw actions
+        self._action_q01: np.ndarray | None = None
+        self._action_q99: np.ndarray | None = None
         # f(t-K) for the history pair; None on the first call of an episode
         self._prev_features: torch.Tensor | None = None
 
@@ -75,10 +76,11 @@ class RoboMambaWrapper(PolicyWrapper):
 
         self._head, self._meta = load_head(_resolve(self._checkpoint), device=device)
 
-        # absent for heads trained with --raw-actions; predict() then skips denormalization
-        if self._meta.get("action_mean") is not None:
-            self._action_mean = np.asarray(self._meta["action_mean"], dtype=np.float32)
-            self._action_std = np.asarray(self._meta["action_std"], dtype=np.float32)
+        # absent for checkpoints trained before action normalization was added; predict()
+        # then skips denormalization
+        if self._meta.get("action_q01") is not None:
+            self._action_q01 = np.asarray(self._meta["action_q01"], dtype=np.float32)
+            self._action_q99 = np.asarray(self._meta["action_q99"], dtype=np.float32)
 
         self._trunk = build_trunk(_resolve(self._meta["trunk_checkpoint"]), device=device)
 
@@ -122,8 +124,8 @@ class RoboMambaWrapper(PolicyWrapper):
 
         # order matters: the gripper remap
         #  assumes raw LIBERO units, so denormalize first
-        if self._action_mean is not None:
-            actions = denormalize_actions(actions, self._action_mean, self._action_std)
+        if self._action_q01 is not None:
+            actions = denormalize_actions(actions, self._action_q01, self._action_q99)
         actions = env_gripper_to_rlds(actions)
 
         return PolicyOutput(

@@ -7,12 +7,14 @@ and tests/test_wrapper_validation.py for the load()/get_metadata() contract chec
 import inspect
 
 import numpy as np
+import pytest
 import torch
 
+from config.constants import OPENVLA_INPUT_RESOLUTION
+from config.paths import LIBERO_DATASETS, ROBOMAMBA_SRC
 from core.robomamba_arch import (
     ACTION_CHUNK,
     ACTION_DIM,
-    FEATURE_CACHE_VERSION,
     HEAD_BLOCKS,
     HEAD_WIDTH,
     HIDDEN_DIM,
@@ -20,6 +22,7 @@ from core.robomamba_arch import (
     IMAGE_SIZE,
     RoboMambaHead,
     _MLPResBlock,
+    _task_instructions,
     build_history_chunks,
     extract_features,
     feature_cache_path,
@@ -77,3 +80,43 @@ def test_build_history_chunks_clamps_at_demo_boundaries():
     # the last chunk repeats the demo's final action instead of running into demo 1
     assert y[0, :, 0].tolist() == [float(i) for i in range(ACTION_CHUNK)]
     assert y[n - 1, :, 0].tolist() == [float(n - 1)] * ACTION_CHUNK
+
+
+def test_robomamba_src_exists():
+    assert ROBOMAMBA_SRC.is_dir(), f"missing vendored robo_mamba source at {ROBOMAMBA_SRC}"
+
+
+def test_image_size_matches_clip_native_resolution():
+    assert IMAGE_SIZE == OPENVLA_INPUT_RESOLUTION
+
+
+_SPATIAL_DIRS = [LIBERO_DATASETS / "libero_spatial", LIBERO_DATASETS / "libero_spatial_regen"]
+
+
+@pytest.mark.parametrize("data_dir", _SPATIAL_DIRS, ids=lambda p: p.name)
+def test_every_spatial_hdf5_resolves_to_an_instruction(data_dir):
+    """Regenerated hdf5s have no problem_info attr -- instructions come from the registry."""
+    pytest.importorskip("libero")
+    if not any(data_dir.glob("*.hdf5")):
+        pytest.skip(f"{data_dir} not present")
+    instructions = _task_instructions("spatial")
+    for path in sorted(data_dir.glob("*.hdf5")):
+        assert path.stem.removesuffix("_demo") in instructions
+
+
+def test_registry_instruction_matches_shipped_hdf5_problem_info():
+    """The invariant the filename-based lookup relies on: registry language must match the
+    original hdf5's stored instruction, so the same lookup is valid for regen dirs too."""
+    pytest.importorskip("libero")
+    import json
+
+    import h5py
+
+    data_dir = LIBERO_DATASETS / "libero_spatial"
+    if not any(data_dir.glob("*.hdf5")):
+        pytest.skip(f"{data_dir} not present")
+    instructions = _task_instructions("spatial")
+    for path in sorted(data_dir.glob("*.hdf5")):
+        with h5py.File(path, "r") as f:
+            stored = json.loads(f["data"].attrs["problem_info"])["language_instruction"]
+        assert instructions[path.stem.removesuffix("_demo")] == stored

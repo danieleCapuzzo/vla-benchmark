@@ -8,8 +8,9 @@ naming, so this loads the same weights through the actively-maintained path.
 
 from __future__ import annotations
 
+import contextlib
 import glob
-import json
+import os
 import sys
 import warnings
 from pathlib import Path
@@ -22,15 +23,13 @@ import torch.nn as nn
 from PIL import Image
 from tqdm import tqdm
 
+from config.constants import ROBOMAMBA_IMAGE_SIZE, SUITE_TO_DATASET_DIR
+from config.paths import ROBOMAMBA_SRC
 from core.core_utils import resize_frame, to_upright
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-_ROBOMAMBA_SRC = _REPO_ROOT / "robo_mamba" / "src"
-
-IMAGE_SIZE = 128  # LIBERO hdf5 native resolution; RoboMamba's own transform upsamples to 224
+IMAGE_SIZE = ROBOMAMBA_IMAGE_SIZE  # CLIP ViT-L/14@224, fed from 256px renders
 HIDDEN_DIM = 2560  # Mamba-2.8B hidden size
 ACTION_DIM = 7
-NUM_CAMERAS = 1
 PROMPT_TEMPLATE = "<|user|> <image>\n{instruction}\n<|assistant|>"
 
 # Actions predicted per trunk forward, executed open-loop by the evaluator's queue.
@@ -40,22 +39,6 @@ ACTION_CHUNK = 8
 # resolves it. The gap equals the chunk because the evaluator only calls predict() once per
 # chunk, so at eval the previous feature is always ACTION_CHUNK steps old.
 HISTORY_FRAMES = 2
-
-# Bumped whenever anything upstream of the cached features changes (orientation, resolution,
-# prompt, readout). It is part of the cache FILENAME, so a stale cache is missed rather than
-# silently reused -- extraction is ~20 min/suite and a hit is trusted blindly.
-#   v1: pooled over all positions, native-orientation (upside-down) frames
-#   v2: pooled over language positions only, upright frames
-FEATURE_CACHE_VERSION = "v2"
-
-SUITE_TO_DATASET_DIR = {
-    "spatial": "libero_spatial",
-    "object": "libero_object",
-    "goal": "libero_goal",
-    "long": "libero_10",
-}
-SUITE_TO_TASK_SUITE_NAME = dict(SUITE_TO_DATASET_DIR)
-
 
 def to_model_input(image: np.ndarray, transform) -> torch.Tensor:
     """
@@ -69,8 +52,8 @@ def to_model_input(image: np.ndarray, transform) -> torch.Tensor:
 def _ensure_robomamba_importable() -> None:
     """robo_mamba/src has no __init__.py and its modules import as `model.vision`, so its
     src/ dir must be on sys.path."""
-    if str(_ROBOMAMBA_SRC) not in sys.path:
-        sys.path.insert(0, str(_ROBOMAMBA_SRC))
+    if str(ROBOMAMBA_SRC) not in sys.path:
+        sys.path.insert(0, str(ROBOMAMBA_SRC))
 
 
 def build_trunk(checkpoint_path: Path, device: str, dtype: torch.dtype = torch.bfloat16):
@@ -240,21 +223,41 @@ def _demo_files(data_dir: Path) -> List[Path]:
 
 
 def feature_cache_path(output_dir: Path, suite: str) -> Path:
-    """Versioned cache path -- see FEATURE_CACHE_VERSION."""
-    return output_dir / "robomamba" / suite / f"features_{FEATURE_CACHE_VERSION}.pt"
+    """Cache path for a suite's extracted features."""
+    return output_dir / "robomamba" / suite / "features.pt"
 
 
-def iter_suite_frames(data_dir: Path):
+def _task_instructions(suite: str) -> Dict[str, str]:
+    """Maps `{task.name}` -> task language from the LIBERO benchmark registry.
+
+    Regenerated hdf5s carry no `problem_info` attr, so instructions come from the filename.
+    """
+    from libero.libero import benchmark
+
+    # get_benchmark_dict() prints a banner that would corrupt the extraction tqdm bar.
+    with open(os.devnull, "w") as devnull, contextlib.redirect_stdout(devnull):
+        task_suite = benchmark.get_benchmark_dict()[SUITE_TO_DATASET_DIR[suite]]()
+    return {
+        task_suite.get_task(i).name: task_suite.get_task(i).language
+        for i in range(task_suite.n_tasks)
+    }
+
+
+def iter_suite_frames(data_dir: Path, suite: str):
     """
     Yields (instruction, images, actions, demo_ids) once per task hdf5 file.
     """
+    instructions = _task_instructions(suite)
     demo_id = 0
     for path in _demo_files(data_dir):
+        stem = path.stem.removesuffix("_demo")
+        if stem not in instructions:
+            raise KeyError(f"{path.name} has no matching task in the {suite} benchmark registry")
+        instruction = instructions[stem]
         images: List[np.ndarray] = []
         actions: List[np.ndarray] = []
         demo_ids: List[int] = []
         with h5py.File(path, "r") as f:
-            instruction = json.loads(f["data"].attrs["problem_info"])["language_instruction"]
             for demo_key in f["data"]:
                 demo = f["data"][demo_key]
                 demo_images = demo["obs"]["agentview_rgb"][:]
@@ -274,9 +277,11 @@ def suite_frame_count(data_dir: Path) -> int:
     return total
 
 
-def extract_features(trunk, data_dir: Path, batch_size: int, device: str,) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+def extract_features(trunk, data_dir: Path, suite: str, batch_size: int, device: str) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     One frozen-trunk pass over every frame in `data_dir`, one task file at a time.
+    `suite` resolves task instructions via the LIBERO benchmark registry (see
+    `_task_instructions`).
 
     Returns (features fp16 (N, 2560), actions fp32 (N, 7), demo_ids int64 (N,)) on CPU.
     """
@@ -287,7 +292,7 @@ def extract_features(trunk, data_dir: Path, batch_size: int, device: str,) -> Tu
 
     write_ptr = 0
     pbar = tqdm(total=n_frames, desc="extracting features", unit="frame")
-    for instruction, images, actions, demo_ids in iter_suite_frames(data_dir):
+    for instruction, images, actions, demo_ids in iter_suite_frames(data_dir, suite):
         prompt = PROMPT_TEMPLATE.format(instruction=instruction)
         input_ids_row = trunk.tokenizer(prompt, return_tensors="pt").input_ids
 
