@@ -98,14 +98,6 @@ _DEFAULT_CONFIG_BY_MODEL = {
     "robomamba": "config_robomamba.json",
 }
 
-# camera count is fixed per model, not a runtime parameter.
-NUM_CAMERAS_BY_MODEL = {
-    "openvla": 1,
-    "oft": 2,
-    "mail": 2,
-    "robomamba": 1,
-}
-
 
 def default_config_for(model: str) -> Path:
     """Returns the default `config/config_<model>.json` path for the given --model."""
