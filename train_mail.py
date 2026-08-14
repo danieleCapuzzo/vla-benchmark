@@ -10,8 +10,8 @@ Run in the `bench-env` conda env:
 Trains on 100% of the demos per task by default (--num-demos, unset = all 50/task),
 matching how OpenVLA/OpenVLA-OFT were finetuned. 
 
-Model architecture: imported from mail/ (see core/mail_arch.py)
-Dataset: `mail/dataset/multi_task_dataset_aug.py MultiTaskDataset` used directly
+Model architecture: imported from mail/ (see core/arch/mail_arch.py)
+Dataset: `core/dataproc/mail_dataset.py` (wraps `mail/dataset/multi_task_dataset_aug.py`)
 """
 
 from __future__ import annotations
@@ -34,25 +34,8 @@ warnings.filterwarnings(
 
 from config.constants import SUITE_TO_DATASET_DIR
 from config.paths import LIBERO_DATASETS
-from core.mail_arch import (
-    SUITE_ARCH_CONFIG,
-    LanguageMultiTaskDataset,
-    MailPolicy,
-    _ensure_mail_importable,
-    save_checkpoint,
-)
-
-OBS_MODALITIES = {
-    "obs": {
-        "low_dim": ["ee_ori", "ee_pos", "gripper_states", "joint_states"],
-        "rgb": ["agentview_rgb", "eye_in_hand_rgb"],
-        "depth": [],
-        "scan": [],
-    },
-    "goal": {"low_dim": [], "rgb": [], "depth": [], "scan": []},
-}
-MAX_LEN_DATA = 520  # mail/config/benchmark_libero_new.yaml; must exceed every demo's length
-
+from core.arch.mail_arch import SUITE_ARCH_CONFIG, MailPolicy, save_checkpoint
+from core.dataproc.mail_dataset import build_mail_dataset
 
 _FROZEN_STATE_DICT_PREFIX = "language_encoder."
 
@@ -114,9 +97,10 @@ def main() -> None:
     args = parse_args()
     torch.manual_seed(args.seed)
 
+    from core.arch.mail_arch import _ensure_mail_importable
+
     _ensure_mail_importable()
     from agents.utils import ActionScaler
-    from dataset.multi_task_dataset_aug import MultiTaskDataset
 
     dataset_dir_name = SUITE_TO_DATASET_DIR[args.suite]
     data_dir = Path(args.data_dir) if args.data_dir else LIBERO_DATASETS / dataset_dir_name
@@ -127,26 +111,14 @@ def main() -> None:
         raise FileNotFoundError(f"No .hdf5 files found in {data_dir}")
 
     print(f"[{args.suite}] loading dataset from {data_dir}...")
-    dataset_kwargs = dict(
-        data_directory=str(data_dir),
-        obs_keys="rgb",
-        obs_modalities=OBS_MODALITIES,
-        dataset_keys=["actions", "dones", "obs", "rewards", "states"],
-        filter_by_attribute=None,
-        padding=False,
-        device="cpu",
-        obs_dim=64,
-        action_dim=arch.action_dim,
-        state_dim=110,
-        max_len_data=MAX_LEN_DATA,
-        window_size=arch.window_size,
-        num_data=args.num_demos if args.num_demos is not None else 50,
-        data_aug=False,
+    dataset = build_mail_dataset(
+        suite=args.suite,
+        task_suite_name=dataset_dir_name,
+        data_dir=data_dir,
+        arch=arch,
+        num_demos=args.num_demos,
+        language=args.language,
     )
-    if args.language:
-        dataset = LanguageMultiTaskDataset(task_suite_name=dataset_dir_name, **dataset_kwargs)
-    else:
-        dataset = MultiTaskDataset(**dataset_kwargs)
     print(f"[{args.suite}] {len(dataset)} training windows (num_demos={args.num_demos or 'all'})")
     loader = DataLoader(
         dataset,

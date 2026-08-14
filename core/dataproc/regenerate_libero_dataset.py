@@ -28,8 +28,9 @@ Output schema is key-compatible with the original hdf5s (`obs/agentview_rgb`,
 `obs/eye_in_hand_rgb`, `actions`, `states`, `obs/ee_pos`, `obs/ee_ori`, `obs/joint_states`,
 `obs/gripper_states`), so it drops into any existing `--data-dir`.
 
-Usage:
-    python core/regenerate_libero_dataset.py \\
+Relative `--libero_raw_data_dir` / `--libero_target_dir` / `--metainfo-path` values resolve
+against the repo root, not the caller's cwd, so this runs the same from anywhere:
+    python core/dataproc/regenerate_libero_dataset.py \\
         --libero_task_suite libero_spatial \\
         --libero_raw_data_dir datasets/libero_spatial \\
         --libero_target_dir datasets/libero_spatial_regen
@@ -51,10 +52,16 @@ import robosuite.utils.transform_utils as T
 from tqdm.auto import tqdm
 from libero.libero import benchmark
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from config.paths import REPO_ROOT  # noqa: E402
 from core.core_utils import get_libero_dummy_action, get_libero_env  # noqa: E402
+
+
+def _resolve(path: str) -> str:
+    """Repo-relative CLI paths -> absolute, independent of the caller's cwd."""
+    p = Path(path)
+    return str(p if p.is_absolute() else REPO_ROOT / p)
 
 IMAGE_RESOLUTION = 256
 MODEL_FAMILY = "openvla"  # only picks the dummy-action shape in core_utils; harmless label
@@ -215,6 +222,11 @@ def _process_task_star(worker_args: tuple) -> tuple[str, dict, int, int, int]:
 
 
 def main(args: argparse.Namespace) -> None:
+    args.libero_raw_data_dir = _resolve(args.libero_raw_data_dir)
+    args.libero_target_dir = _resolve(args.libero_target_dir)
+    if args.metainfo_path:
+        args.metainfo_path = _resolve(args.metainfo_path)
+
     target_dir = Path(args.libero_target_dir)
     if target_dir.is_dir() and not args.overwrite:
         raise FileExistsError(

@@ -17,9 +17,9 @@ from config.paths import REPO_ROOT
 from core.core_utils import env_gripper_to_rlds, resize_frame
 from core.factory import PolicyFactory
 from core.policy_wrapper import PolicyMetadata, PolicyOutput, PolicyWrapper
-from core.mail_arch import load_checkpoint
+from core.arch.mail_arch import load_checkpoint
 
-IMAGE_SIZE = MAIL_IMAGE_SIZE  # MaIL's native training resolution, see core/mail_arch.py
+IMAGE_SIZE = MAIL_IMAGE_SIZE  # MaIL's native training resolution, see core/arch/mail_arch.py
 _REPO_ROOT = REPO_ROOT
 
 # all train_mail.py checkpoints are trained as the 2-camera (agentview + wrist) variant.
@@ -64,7 +64,6 @@ class MailWrapper(PolicyWrapper):
         Args:
             quant: Must be "none" as MaIL has no quantized loading path.
             **kwargs: Unused; present for interface compatibility.
-
         Raises:
             ValueError: if `quant != "none"`, or the checkpoint wasn't trained with the
                 2-camera (agentview + wrist) configuration this wrapper requires.
@@ -110,12 +109,10 @@ class MailWrapper(PolicyWrapper):
         """
         Runs one MaIL step with action chunking implemented with an 
         internal cache, the network is invoked every `action_seq` calls.
-
         Args:
             observation: Dict with "raw_obs" (the raw LIBERO env observation dict).
             task_description: Natural-language task instruction. Used only if this
                 checkpoint was trained with `--language` (see `load()`); ignored otherwise.
-
         Returns:
             PolicyOutput with actions of shape (1, ACTION_DIM), is_chunked=False.
         """

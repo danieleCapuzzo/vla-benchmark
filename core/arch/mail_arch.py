@@ -1,17 +1,16 @@
-"""
-Porting for MaIL to mamba_ssm version > 2.0 (to exploit sm_120 GPU operations).
+"""Ports MaIL to mamba_ssm version > 2.0 (to exploit sm_120 GPU operations).
+
 Only difference from `mail/`: `_install_mamba_block_shim` below patches around a
-mamba_ssm 1.x vs 2.x API difference so mail/'s unmodified code still imports. 
-Everything else matches the original`mail/` exactly.
+mamba_ssm 1.x vs 2.x API difference so mail/'s unmodified code still imports.
+Everything else matches the original `mail/` exactly.
 """
 
 from __future__ import annotations
 
-import os
 import sys
 import warnings
 from dataclasses import dataclass
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, Sequence
 
 import torch
 import torch.nn as nn
@@ -30,9 +29,11 @@ warnings.filterwarnings(
 )
 
 def _install_mamba_block_shim() -> None:
-    """mamba_ssm 2.x moved `Block` and added a required `mlp_cls` arg; mail/'s mamba.py
-    still does `from mamba_ssm.modules.mamba_simple import Block` (1.x API). Patch a
-    subclass with `mlp_cls=nn.Identity` (no MLP in MaIL's blocks) back onto that path."""
+    """
+    Patches mamba_ssm's `Block` to restore the pre-2.x constructor signature.
+    Mamba_ssm 2.x moved `Block` and added a required `mlp_cls` arg. Installs a
+    subclass with `mlp_cls=nn.Identity` (no MLP in MaIL's blocks).
+    """
     import mamba_ssm.modules.mamba_simple as mamba_simple
     from mamba_ssm.modules.block import Block as _Block
 
@@ -65,7 +66,9 @@ def _ensure_mail_importable() -> None:
 
 @dataclass(frozen=True)
 class MailArchConfig:
-    """Per-suite architecture hyperparameters, matching mail/'s configs."""
+    """
+    Per-suite architecture hyperparameters, matching mail/'s configs.
+    """
 
     obs_seq: int
     action_seq: int
@@ -93,8 +96,10 @@ SUITE_ARCH_CONFIG: Dict[str, MailArchConfig] = {
 
 
 class MailPolicy(nn.Module):
-    """obs_encoder (ResNet18+SpatialSoftmax) + DDPM(DiffusionMambaCross) action head,
-    same as mail/'s `MultiImageObsEncoder` + `Diffusion(DiffusionMambaCross(...))`."""
+    """
+    MaIL policy: obs_encoder (ResNet18+SpatialSoftmax) + DDPM(DiffusionMambaCross) action head.
+    Matches mail/'s `MultiImageObsEncoder` + `Diffusion(DiffusionMambaCross(...))`.
+    """
 
     def __init__(
         self, arch: MailArchConfig, num_cameras: int, device: str, language: bool = False
@@ -197,13 +202,24 @@ class MailPolicy(nn.Module):
         self.diffusion: nn.Module = hydra.utils.instantiate(diffusion_cfg).to(device)
 
     def set_action_bounds(self, y_low: torch.Tensor, y_high: torch.Tensor) -> None:
-        """Required before sampling; `Diffusion.p_mean_variance` clamps to these bounds."""
+        """
+        Sets the action bounds `Diffusion.p_mean_variance` clamps to during sampling.
+        Args:
+            y_low: Per-dimension lower bound.
+            y_high: Per-dimension upper bound.
+        """
         self.diffusion.min_action = y_low.to(self.device)
         self.diffusion.max_action = y_high.to(self.device)
 
     def train(self, mode: bool = True) -> "MailPolicy":
-        """Keeps the frozen CLIP text encoder in eval mode (its transformer blocks have
-        dropout) regardless of caller, since it never trains (see `_encode_language`)."""
+        """
+        Sets training mode, keeping the frozen CLIP text encoder in eval mode.
+        Args:
+            mode: True for training mode, False for evaluation mode.
+
+        Returns:
+            This module.
+        """
         super().train(mode)
         if self.language:
             self.language_encoder.eval()
@@ -219,14 +235,16 @@ class MailPolicy(nn.Module):
         return feat.view(b, t, -1)
 
     def _encode_language(self, language: str | Sequence[str] | torch.Tensor) -> torch.Tensor:
-        """language: either raw instruction(s) (a single str or one per batch element,
-        live-encoded through the frozen CLIP text encoder -- the only option at eval time,
-        see wrappers/mail_wrapper.py), or a precomputed (B, 1, 512)/(B, 512) CLIP embedding
-        batch as returned per-window by `LanguageMultiTaskDataset` (mail/'s own
-        `task_embeddings/<suite>.pkl`, reused instead of re-encoding during training).
-        Returns (B, state_dim). Mirrors mail/'s DiffusionLanguagePolicy: CLIP frozen
-        (no_grad), followed by a trainable linear projection (kept outside no_grad so it
-        receives gradients)."""
+        """
+        Encodes language into the state embedding space.
+        Mirrors mail/'s DiffusionLanguagePolicy: CLIP frozen (no_grad), followed by a
+        trainable linear projection.
+        Args:
+            language: Either raw instruction(s), or a precomputed (B, 1, 512)/(B, 512) CLIP
+                embedding batch as returned per-window by `LanguageMultiTaskDataset`.
+        Returns:
+            (B, state_dim) language embedding.
+        """
         if isinstance(language, torch.Tensor):
             text_features = language.to(self.device)
             if text_features.dim() == 3:
@@ -248,26 +266,36 @@ class MailPolicy(nn.Module):
     def _prepend_language(
         self, obs_feat: torch.Tensor, language: str | Sequence[str] | torch.Tensor
     ) -> torch.Tensor:
-        """obs_feat: (B, obs_seq, state_dim). Tiles the language embedding across obs_seq
-        timesteps and concatenates it in front, matching DiffusionLanguagePolicy.forward's
-        `torch.cat([text_embedding, obs], dim=1)` token-concatenation pattern."""
+        """
+        Prepends the encoded language embedding to the observation feature sequence.
+        Args:
+            obs_feat: (B, obs_seq, state_dim) observation features.
+            language: See `_encode_language`.
+        Returns:
+            (B, obs_seq + 1, state_dim) sequence with the language embedding prepended.
+        """
         b, t = obs_feat.shape[:2]
         lang_feat = self._encode_language(language).unsqueeze(1).expand(b, t, -1)
         return torch.cat([lang_feat, obs_feat], dim=1)
 
     def loss(
-        self,
-        agentview: torch.Tensor,
-        wrist: torch.Tensor | None,
-        actions: torch.Tensor,
-        mask: torch.Tensor | None = None,
+        self, agentview: torch.Tensor, wrist: torch.Tensor | None,
+        actions: torch.Tensor, mask: torch.Tensor | None = None,
         language: str | Sequence[str] | torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """actions: (B, window_size, action_dim), already normalized. Only the last
-        action_seq steps are supervised; the first obs_seq-1 steps only provide
-        observation context. mask: (B, window_size) validity mask (1=valid, 0=padded),
-        passed as `weights` to `Diffusion.loss`. language: required iff this policy was
-        built with `language=True` -- see `_encode_language` for accepted forms."""
+        """
+        Computes the diffusion training loss for a batch of observation-action windows.
+        Only the last action_seq steps are supervised; the first obs_seq-1 steps only
+        provide observation context.
+        Args:
+            agentview: (B, window_size, 3, H, W) agent-view images.
+            wrist: (B, window_size, 3, H, W) wrist-camera images, or None if unused.
+            actions: (B, window_size, action_dim) already-normalized actions.
+            mask: (B, window_size) validity mask (1=valid, 0=padded), or None.
+            language: See `_encode_language`, or None if this policy is not language-conditioned.
+        Returns:
+            Scalar diffusion loss.
+        """
         obs_seq = self.arch.obs_seq
         agentview = agentview[:, :obs_seq].contiguous()
         wrist = wrist[:, :obs_seq].contiguous() if wrist is not None else None
@@ -282,14 +310,19 @@ class MailPolicy(nn.Module):
 
     @torch.no_grad()
     def predict(
-        self,
-        agentview: torch.Tensor,
-        wrist: torch.Tensor | None,
+        self, agentview: torch.Tensor, wrist: torch.Tensor | None,
         language: str | Sequence[str] | torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """agentview/wrist: (1, obs_seq, 3, H, W). Returns (action_seq, action_dim), normalized.
-        language: required iff this policy was built with `language=True` -- see
-        `_encode_language` for accepted forms."""
+        """
+        Samples an action sequence from the diffusion policy.
+        Args:
+            agentview: (1, obs_seq, 3, H, W) agent-view images.
+            wrist: (1, obs_seq, 3, H, W) wrist-camera images, or None if unused.
+            language: Required iff this policy was built with `language=True` -- see
+                `_encode_language` for accepted forms.
+        Returns:
+            (action_seq, action_dim) normalized action sequence.
+        """
         obs_feat = self._encode_obs(agentview, wrist)
         if self.language:
             obs_feat = self._prepend_language(obs_feat, language)
@@ -298,18 +331,26 @@ class MailPolicy(nn.Module):
 
 
 _FROZEN_STATE_DICT_PREFIX = "language_encoder."
-
-
 def _strip_frozen_language_encoder(state_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-    """Excludes the frozen CLIP text encoder's ~63M weights from what gets persisted: they
-    never receive gradients (see `MailPolicy._encode_language`) and are trivially
-    re-downloaded from HF on load, so including them would roughly double every checkpoint
-    write for no benefit."""
+    """
+    Excludes the frozen CLIP text encoder's weights from a state dict before persisting.
+    Args:
+        state_dict: A model or EMA state dict.
+    Returns:
+        A copy of `state_dict` with all frozen language-encoder keys removed.
+    """
     return {k: v for k, v in state_dict.items() if not k.startswith(_FROZEN_STATE_DICT_PREFIX)}
 
 
 def _scaler_state_dict(scaler: "ActionScaler") -> Dict[str, Any]:
-    """mail/'s ActionScaler has no save/load of its own; persist its derived tensors."""
+    """
+    Builds a serializable state dict for an ActionScaler.
+    mail/'s ActionScaler has no save/load of its own; this persists its derived tensors.
+    Args:
+        scaler: The scaler to serialize.
+    Returns:
+        A dict of the scaler's derived tensors and config, ready for `torch.save`.
+    """
     return {
         "scale_data": scaler.scale_data,
         "y_mean": scaler.y_mean.cpu(),
@@ -319,6 +360,14 @@ def _scaler_state_dict(scaler: "ActionScaler") -> Dict[str, Any]:
 
 
 def _scaler_from_state_dict(state: Dict[str, Any], device: str) -> "ActionScaler":
+    """
+    Reconstructs an ActionScaler from a state dict produced by `_scaler_state_dict`.
+    Args:
+        state: A state dict as returned by `_scaler_state_dict`.
+        device: Device to load the scaler's tensors onto.
+    Returns:
+        The reconstructed scaler.
+    """
     from agents.utils import ActionScaler
 
     scaler = object.__new__(ActionScaler)
@@ -331,12 +380,18 @@ def _scaler_from_state_dict(state: Dict[str, Any], device: str) -> "ActionScaler
 
 
 def save_checkpoint(
-    path: Path,
-    policy: MailPolicy,
-    scaler: "ActionScaler",
-    ema_shadow: Dict[str, torch.Tensor],
-    meta: Dict[str, Any],
+    path: Path, policy: MailPolicy, scaler: "ActionScaler",
+    ema_shadow: Dict[str, torch.Tensor], meta: Dict[str, Any],
 ) -> None:
+    """
+    Saves a policy, scaler, and EMA shadow weights to a checkpoint file.
+    Args:
+        path: Destination file path; parent directories are created if missing.
+        policy: The policy whose weights to save.
+        scaler: The action scaler to save alongside the policy.
+        ema_shadow: EMA shadow weights, keyed like `policy.state_dict()`.
+        meta: Arbitrary metadata to persist (e.g. arch config, num_cameras, language flag).
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(
         {
@@ -350,7 +405,15 @@ def save_checkpoint(
 
 
 def load_checkpoint(path: Path, device: str, use_ema: bool = True) -> tuple[MailPolicy, "ActionScaler", dict]:
-    """Returns (policy, scaler, meta)."""
+    """
+    Loads a policy, scaler, and metadata from a checkpoint file.
+    Args:
+        path: Checkpoint file path, as written by `save_checkpoint`.
+        device: Device to load the policy and scaler onto.
+        use_ema: If True, load the EMA shadow weights; otherwise load the raw model weights.
+    Returns:
+        A (policy, scaler, meta) tuple.
+    """
     ckpt = torch.load(path, map_location=device, weights_only=False)
     meta = ckpt["meta"]
     arch = MailArchConfig(**meta["arch"])
@@ -369,86 +432,3 @@ def load_checkpoint(path: Path, device: str, use_ema: bool = True) -> tuple[Mail
     policy.set_action_bounds(scaler.y_bounds_tensor[0], scaler.y_bounds_tensor[1])
 
     return policy, scaler, meta
-
-
-def _load_demo_language_embeddings(
-    data_dir: List[str], task_suite_name: str, filter_by_attribute: str | None, num_data: int
-) -> List[torch.Tensor]:
-    """One precomputed (1, 512) CLIP embedding per demo index `i`, matching
-    `self.actions`/`self.agentview_rgb`'s flat ordering. Reuses mail/'s own
-    `task_embeddings/<suite>.pkl` (built by `mail/get_task_embeddings.py`, same CLIP model)
-    instead of re-encoding instructions ourselves -- `mail/dataset/multi_task_dataset_goal.py`
-    is the vendored dataset paired with these embeddings, but isn't used directly here since
-    it hardcodes an absolute cluster path for the pkl location and drops the `mask` field
-    `MailPolicy.loss()` needs; the demo-count-per-file loop below (needed to repeat each
-    file's embedding once per demo actually loaded from it) replays
-    `MultiTaskDataset.__init__`'s same filter_by_attribute/sort/[:num_data] slicing, same as
-    `multi_task_dataset_goal.py`'s own loop.
-
-    Task name (pkl key) is derived from the filename exactly as
-    `multi_task_dataset_goal.py` does (`os.path.basename(f).split(".")[0][:-5]`, i.e. minus
-    ".hdf5" and the trailing "_demo") -- NOT via `task.language`, which for libero_10 drops a
-    "SCENE" prefix the filename keeps.
-    """
-    import pickle
-
-    import h5py
-    import numpy as np
-
-    pkl_path = MAIL_DIR / "task_embeddings" / f"{task_suite_name}.pkl"
-    with open(pkl_path, "rb") as f:
-        embedding_by_task_name: Dict[str, torch.Tensor] = pickle.load(f)
-
-    demo_embeddings: List[torch.Tensor] = []
-    for file_path in data_dir:
-        task_name = os.path.basename(file_path).split(".")[0][:-5]
-        embedding = embedding_by_task_name[task_name]
-
-        with h5py.File(file_path, "r") as f:
-            if filter_by_attribute is not None:
-                demo_keys_list = [
-                    elem.decode("utf-8")
-                    for elem in np.array(f[f"mask/{filter_by_attribute}"][:])
-                ]
-            else:
-                demo_keys_list = list(f["data"].keys())
-            indices = np.argsort([int(elem[5:]) for elem in demo_keys_list])
-            num_demos_used = len(indices[:num_data])
-
-        demo_embeddings.extend([embedding] * num_demos_used)
-
-    return demo_embeddings
-
-
-class LanguageMultiTaskDataset:
-    """Wraps mail/'s `MultiTaskDataset` (vendored, gitignored -- not modified) to also
-    return each window's precomputed task-language embedding (see
-    `_load_demo_language_embeddings`), matching `multi_task_dataset_goal.py`'s per-sample
-    `task_emb`. Composition instead of subclassing: `MultiTaskDataset.__init__` builds
-    everything (including `self.slices`) in one pass with no per-demo hook to extend, so
-    wrapping and delegating is simpler than replaying its constructor.
-    """
-
-    def __init__(self, *, task_suite_name: str, **dataset_kwargs: Any) -> None:
-        _ensure_mail_importable()
-        from dataset.multi_task_dataset_aug import MultiTaskDataset
-
-        self._dataset = MultiTaskDataset(**dataset_kwargs)
-        self._demo_embeddings = _load_demo_language_embeddings(
-            self._dataset.data_dir,
-            task_suite_name=task_suite_name,
-            filter_by_attribute=dataset_kwargs.get("filter_by_attribute"),
-            num_data=dataset_kwargs.get("num_data", 10),
-        )
-        assert len(self._demo_embeddings) == self._dataset.num_data
-
-    def get_all_actions(self) -> torch.Tensor:
-        return self._dataset.get_all_actions()
-
-    def __len__(self) -> int:
-        return len(self._dataset)
-
-    def __getitem__(self, idx: int):
-        agentview_rgb, eye_in_hand_rgb, act, mask = self._dataset[idx]
-        i, _start, _end = self._dataset.slices[idx]
-        return agentview_rgb, eye_in_hand_rgb, act, mask, self._demo_embeddings[i]
