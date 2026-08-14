@@ -26,7 +26,7 @@ from core.metrics import (
     aggregate_latency,
     aggregate_smoothness,
 )
-from core.policy_wrapper import PolicyMetadata
+from wrappers.policy_wrapper import PolicyMetadata
 
 SUMMARY_CSV_FIELDS = [
     "model_id",

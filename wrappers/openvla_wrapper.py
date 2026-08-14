@@ -33,10 +33,7 @@ if str(_OPENVLA_REPO_ROOT) not in sys.path:
 
 from config.loader import resolve_unnorm_key  # noqa: E402
 from core.factory import PolicyFactory  # noqa: E402
-from core.policy_wrapper import PolicyMetadata, PolicyOutput, PolicyWrapper  # noqa: E402
-
-# OpenVLA uses no wrist-camera
-NUM_CAMERAS = NUM_CAMERAS_BY_MODEL["openvla"]
+from wrappers.policy_wrapper import PolicyMetadata, PolicyOutput, PolicyWrapper  # noqa: E402
 
 
 @PolicyFactory.register("openvla")
@@ -61,21 +58,36 @@ class OpenVlaWrapper(PolicyWrapper):
         self._processor = None
         self._quant = "none"
 
-    def load(self, quant: str = "none", **kwargs: Any) -> None:
+    def load(
+        self, quant: str = "none", *, path: str | Path | None = None,
+        trunk_path: str | Path | None = None, 
+        head_path: str | Path | None = None,
+        **kwargs: Any,
+    ) -> None:
         """
         Loads the OpenVLA checkpoint via `wrapper_utils.load_openvla_model`.
 
         Args:
             quant: quantization out of "none", "8bit", "4bit".
+            path: HF Hub id or local path; overrides the checkpoint set in `__init__` when
+                given. None reuses the existing checkpoint.
+            trunk_path: Unsupported for OpenVLA.
+            head_path: Unsupported for OpenVLA.
             **kwargs: Unused; present for interface compatibility.
 
         Raises:
-            ValueError: if `quant` is unsupported.
+            ValueError: if `quant` is unsupported, or `trunk_path`/`head_path` is given.
         """
         if quant not in ("none", "8bit", "4bit"):
             raise ValueError(
                 f"Unsupported quant '{quant}'. Must be 'none', '8bit', or '4bit'."
             )
+        if trunk_path is not None or head_path is not None:
+            raise ValueError(
+                "OpenVlaWrapper has no trunk/head split."
+            )
+        if path is not None:
+            self._checkpoint = str(path)
 
         # patch official OpenVLA assumption that cwd == openvla/
         os.chdir(_OPENVLA_REPO_ROOT)
@@ -151,7 +163,7 @@ class OpenVlaWrapper(PolicyWrapper):
             variant=self._checkpoint,
             num_params=num_params,
             quant=self._quant,
-            num_cameras=NUM_CAMERAS,
+            num_cameras=NUM_CAMERAS_BY_MODEL["openvla"],
             action_chunk_size=1,
             attn_impl="sdpa",
             extra={"unnorm_key": self._unnorm_key},

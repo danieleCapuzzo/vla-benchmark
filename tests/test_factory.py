@@ -3,14 +3,14 @@
 import pytest
 
 from core.factory import PolicyFactory
-from core.policy_wrapper import PolicyMetadata, PolicyOutput, PolicyWrapper
+from wrappers.policy_wrapper import PolicyMetadata, PolicyOutput, PolicyWrapper
 
 
 class _DummyWrapper(PolicyWrapper):
     def __init__(self, **kwargs):
         self.kwargs = kwargs
 
-    def load(self, quant="none", **kwargs):
+    def load(self, quant="none", *, path=None, trunk_path=None, head_path=None, **kwargs):
         pass
 
     def reset(self):

@@ -33,7 +33,7 @@ from core.core_utils import (
     quat2axisangle,
 )
 from core.metrics import compute_smoothness
-from core.policy_wrapper import PolicyWrapper
+from wrappers.policy_wrapper import PolicyWrapper
 
 
 class LiberoEvaluator:

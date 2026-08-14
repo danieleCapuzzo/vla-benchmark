@@ -10,7 +10,9 @@ import numpy as np
 import pytest
 import torch
 
-from wrappers.mail_wrapper import IMAGE_SIZE, NUM_CAMERAS, MailWrapper, _to_model_image
+from config.constants import MAIL_IMAGE_SIZE as IMAGE_SIZE
+from config.constants import NUM_CAMERAS_BY_MODEL
+from wrappers.mail_wrapper import MailWrapper, _to_model_image
 
 ACTION_SEQ = 5
 OBS_SEQ = 5
@@ -104,7 +106,7 @@ def _wrapper(chunk, language=False):
     w = MailWrapper(checkpoint="unused.pt", unnorm_key="", language=language)
     w._policy = _StubPolicy(chunk)
     w._scaler = _StubScaler()
-    w._meta = {"suite": "spatial", "num_cameras": NUM_CAMERAS}
+    w._meta = {"suite": "spatial", "num_cameras": NUM_CAMERAS_BY_MODEL["mail"]}
     return w
 
 

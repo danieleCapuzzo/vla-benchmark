@@ -16,21 +16,15 @@ from config.constants import MAIL_IMAGE_SIZE, NUM_CAMERAS_BY_MODEL
 from config.paths import REPO_ROOT
 from core.core_utils import env_gripper_to_rlds, resize_frame
 from core.factory import PolicyFactory
-from core.policy_wrapper import PolicyMetadata, PolicyOutput, PolicyWrapper
+from wrappers.policy_wrapper import PolicyMetadata, PolicyOutput, PolicyWrapper
 from core.arch.mail_arch import load_checkpoint
-
-IMAGE_SIZE = MAIL_IMAGE_SIZE  # MaIL's native training resolution, see core/arch/mail_arch.py
-_REPO_ROOT = REPO_ROOT
-
-# all train_mail.py checkpoints are trained as the 2-camera (agentview + wrist) variant.
-NUM_CAMERAS = NUM_CAMERAS_BY_MODEL["mail"]
 
 
 def _to_model_image(image: np.ndarray) -> torch.Tensor:
     """
-    uint8 HWC (any size) -> float32 CHW in [0, 1] at IMAGE_SIZE.
+    uint8 HWC (any size) -> float32 CHW in [0, 1] at MAIL_IMAGE_SIZE.
     """
-    resized = resize_frame(image, IMAGE_SIZE)
+    resized = resize_frame(image, MAIL_IMAGE_SIZE)
     return torch.from_numpy(resized).float().permute(2, 0, 1) / 255.0
 
 
@@ -58,33 +52,51 @@ class MailWrapper(PolicyWrapper):
         self._action_cache: np.ndarray | None = None
         self._action_counter = 0
 
-    def load(self, quant: str = "none", **kwargs: Any) -> None:
+    def load(
+        self,
+        quant: str = "none", *, path: str | Path | None = None,
+        trunk_path: str | Path | None = None,
+        head_path: str | Path | None = None,
+        **kwargs: Any,
+    ) -> None:
         """
-        Loads a MambaIL checkpoint.
+        Loads a MambaIL checkpoint (policy + scaler + meta, single file).
         Args:
             quant: Must be "none" as MaIL has no quantized loading path.
+            path: Checkpoint path; overrides the checkpoint set in `__init__` when given.
+                None reuses the existing checkpoint.
+            trunk_path: Unsupported -- MaIL has no trunk/head split (obs_encoder and
+                diffusion head are trained end-to-end as one unit).
+            head_path: Unsupported, see `trunk_path`.
             **kwargs: Unused; present for interface compatibility.
         Raises:
-            ValueError: if `quant != "none"`, or the checkpoint wasn't trained with the
-                2-camera (agentview + wrist) configuration this wrapper requires.
+            ValueError: if `quant != "none"`, `trunk_path`/`head_path` is given, or the
+                checkpoint wasn't trained with the 2-camera (agentview + wrist)
+                configuration or the language-conditioning setting this wrapper requires.
         """
         if quant != "none":
             raise ValueError(f"MaIL has no quantized loading path; got quant='{quant}'.")
+        if trunk_path is not None or head_path is not None:
+            raise ValueError("MailWrapper has no trunk/head split; pass `path` only.")
+        if path is not None:
+            self._checkpoint = str(path)
+        self._quant = quant
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
         torch.cuda.reset_peak_memory_stats()
         checkpoint_path = Path(self._checkpoint)
         if not checkpoint_path.is_absolute():
-            checkpoint_path = _REPO_ROOT / checkpoint_path
+            checkpoint_path = REPO_ROOT / checkpoint_path
         self._policy, self._scaler, self._meta = load_checkpoint(
             checkpoint_path, device=device, use_ema=True
         )
 
         ckpt_num_cameras = self._meta["num_cameras"]
-        if ckpt_num_cameras != NUM_CAMERAS:
+        if ckpt_num_cameras != NUM_CAMERAS_BY_MODEL["mail"]:
             raise ValueError(
                 f"Checkpoint '{self._checkpoint}' was trained with num_cameras="
-                f"{ckpt_num_cameras}; MailWrapper requires num_cameras={NUM_CAMERAS}."
+                f"{ckpt_num_cameras}; MailWrapper requires "
+                f"num_cameras={NUM_CAMERAS_BY_MODEL['mail']}."
             )
 
         ckpt_language = bool(self._meta.get("language", False))
@@ -93,8 +105,6 @@ class MailWrapper(PolicyWrapper):
                 f"Checkpoint '{self._checkpoint}' was trained with language="
                 f"{ckpt_language}; MailWrapper was constructed with language={self._language}."
             )
-
-        self._quant = quant
 
     def reset(self) -> None:
         """
@@ -175,7 +185,7 @@ class MailWrapper(PolicyWrapper):
             variant=f"ddpm_encdec_{self._meta.get('suite', '?')}",
             num_params=num_params,
             quant=self._quant,
-            num_cameras=NUM_CAMERAS,
+            num_cameras=NUM_CAMERAS_BY_MODEL["mail"],
             action_chunk_size=self._policy.arch.action_seq,     # NOTE: used to compute effective_aps
             attn_impl="n/a",                                    # Mamba SSM, no attention
             extra={
