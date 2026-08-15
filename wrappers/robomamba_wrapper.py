@@ -1,6 +1,6 @@
 """
 Adapter for RoboMamba (see https://github.com/lmzpai/roboMamba): frozen CLIP+Mamba trunk
-fine-tuned per-suite with a small LIBERO action head (see core/robomamba_arch.py).
+fine-tuned per-suite with a small LIBERO action head (see core/arch/robomamba_arch.py).
 """
 
 from __future__ import annotations
@@ -15,18 +15,16 @@ import torch
 from config.constants import NUM_CAMERAS_BY_MODEL
 from core.core_utils import denormalize_actions, env_gripper_to_rlds
 from core.factory import PolicyFactory
-from core.policy_wrapper import PolicyMetadata, PolicyOutput, PolicyWrapper
-from core.robomamba_arch import (
+from wrappers.policy_wrapper import PolicyMetadata, PolicyOutput, PolicyWrapper
+from core.arch.robomamba_arch import (
     HIDDEN_DIM,
     PROMPT_TEMPLATE,
-    build_trunk,
     encode_batch,
-    load_head,
     to_model_input,
 )
+from core.arch.robomamba_arch import load_checkpoint as _arch_load_checkpoint
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-NUM_CAMERAS = NUM_CAMERAS_BY_MODEL["robomamba"]
 
 
 def _resolve(path: str | Path) -> Path:
@@ -53,16 +51,31 @@ class RoboMambaWrapper(PolicyWrapper):
         # per-dim action bounds (q01/q99); None means the head predicts raw actions
         self._action_q01: np.ndarray | None = None
         self._action_q99: np.ndarray | None = None
-        # f(t-K) for the history pair; None on the first call of an episode
-        self._prev_features: torch.Tensor | None = None
 
-    def load(self, quant: str = "none", **kwargs: Any) -> None:
+    def load(
+        self,
+        quant: str = "none",
+        *,
+        path: str | Path | None = None,
+        trunk_path: str | Path | None = None,
+        head_path: str | Path | None = None,
+        **kwargs: Any,
+    ) -> None:
         """
-        Loads a RoboMamba head checkpoint and the frozen trunk it was trained against.
+        Loads a RoboMamba head checkpoint and the frozen trunk it references.
+        Supports combined, separate-file and trunk-only loading.
 
         Args:
             quant: Must be "none"; RoboMamba has no quantized loading path.
-            **kwargs: Unused.
+            path: Combined-checkpoint shorthand for `head_path`; overrides the checkpoint
+                set in `__init__` when given. Ignored if `head_path` is also given.
+            trunk_path: Loads the trunk from this path instead of the head's
+                `meta["trunk_checkpoint"]`. Required if neither `path` nor `head_path` is
+                given (trunk-only load).
+            head_path: Loads the head from this path instead of `path`/`self._checkpoint`.
+                None together with `path=None` means "trunk only" -- `self._head` stays
+                None and `predict()` will raise until a head is loaded separately.
+            **kwargs: Unused; present for interface compatibility.
 
         Raises:
             ValueError: if `quant != "none"`.
@@ -74,21 +87,27 @@ class RoboMambaWrapper(PolicyWrapper):
         device = "cuda" if torch.cuda.is_available() else "cpu"
         torch.cuda.reset_peak_memory_stats()
 
-        self._head, self._meta = load_head(_resolve(self._checkpoint), device=device)
+        resolved_head_path = head_path if head_path is not None else path
+        if resolved_head_path is not None:
+            self._checkpoint = str(resolved_head_path)
 
-        # absent for checkpoints trained before action normalization was added; predict()
-        # then skips denormalization
+        self._head, self._trunk, self._meta = _arch_load_checkpoint(
+            _resolve(resolved_head_path) if resolved_head_path is not None else None,
+            device=device,
+            trunk_path=_resolve(trunk_path) if trunk_path is not None else None,
+        )
+
+        # absent for checkpoints trained before action normalization was added, or for a
+        # trunk-only load; predict() then skips denormalization
         if self._meta.get("action_q01") is not None:
             self._action_q01 = np.asarray(self._meta["action_q01"], dtype=np.float32)
             self._action_q99 = np.asarray(self._meta["action_q99"], dtype=np.float32)
 
-        self._trunk = build_trunk(_resolve(self._meta["trunk_checkpoint"]), device=device)
-
     def reset(self) -> None:
         """
-        Drops the previous episode's feature so its history never leaks into the next.
+        No-op: the head is stateless (single-frame features, no cross-step history). Kept for
+        interface parity with wrappers that do carry episode state.
         """
-        self._prev_features = None
 
     def predict(self, observation: Dict[str, Any], task_description: str) -> PolicyOutput:
         """
@@ -98,7 +117,17 @@ class RoboMambaWrapper(PolicyWrapper):
             task_description: Natural-language task instruction, always used.
         Returns:
             PolicyOutput with actions of shape (ACTION_CHUNK, 7), is_chunked=True.
+        Raises:
+            RuntimeError: If the trunk or head has not been loaded (e.g. after a
+                trunk-only or head-only `load_checkpoint()` call).
         """
+
+        # ensure the model has a trunk and head
+        if self._trunk is None or self._head is None:
+            raise RuntimeError(
+                "predict() requires both a trunk and a head; call load_checkpoint() with "
+                "both, or load the missing half separately."
+            )
         device = next(self._trunk.parameters()).device
         pixel_values = to_model_input(
             observation["raw_obs"]["agentview_image"], self._trunk.transform
@@ -107,19 +136,14 @@ class RoboMambaWrapper(PolicyWrapper):
         prompt = PROMPT_TEMPLATE.format(instruction=task_description)
         input_ids = self._trunk.tokenizer(prompt, return_tensors="pt").input_ids.to(device)
 
-        # latency covers the model call only\
+        # latency covers the model call only
         torch.cuda.synchronize()
         t0 = time.perf_counter()
         features = encode_batch(self._trunk, pixel_values, input_ids)
-
-        # first call of episode has no history: 
-        # pair f(t) with itself
-        prev = features if self._prev_features is None else self._prev_features
-        actions = self._head(torch.cat([prev, features], dim=-1).float())
+        actions = self._head(features.float())
         torch.cuda.synchronize()
         latency_s = time.perf_counter() - t0
 
-        self._prev_features = features
         actions = actions.squeeze(0).detach().cpu().numpy().astype(np.float32)
 
         # order matters: the gripper remap
@@ -148,7 +172,7 @@ class RoboMambaWrapper(PolicyWrapper):
             variant=f"clip224_mamba2.8b_{self._meta.get('suite', '?')}",
             num_params=num_params,
             quant=self._quant,
-            num_cameras=NUM_CAMERAS,
+            num_cameras=NUM_CAMERAS_BY_MODEL["robomamba"],
             action_chunk_size=self._head.chunk,
             attn_impl="n/a",  # Mamba SSM, no attention
             extra={

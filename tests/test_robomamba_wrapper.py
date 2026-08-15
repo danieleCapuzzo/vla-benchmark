@@ -12,24 +12,20 @@ import torch
 
 from config.constants import OPENVLA_INPUT_RESOLUTION
 from config.paths import LIBERO_DATASETS, ROBOMAMBA_SRC
-from core.robomamba_arch import (
+from core.arch.robomamba_arch import (
     ACTION_CHUNK,
     ACTION_DIM,
     HEAD_BLOCKS,
     HEAD_WIDTH,
     HIDDEN_DIM,
-    HISTORY_FRAMES,
     IMAGE_SIZE,
     RoboMambaHead,
     _MLPResBlock,
-    _task_instructions,
-    build_history_chunks,
-    extract_features,
-    feature_cache_path,
     to_model_input,
 )
+from core.dataproc.libero_dataset import _chunk_actions, _task_instructions
 
-IN_DIM = HIDDEN_DIM * HISTORY_FRAMES
+IN_DIM = HIDDEN_DIM
 
 
 def test_head_output_shape():
@@ -58,28 +54,22 @@ def test_head_blocks_are_residual():
     assert torch.allclose(block(x), x)
 
 
-def test_build_history_chunks_clamps_at_demo_boundaries():
-    # two demos, so the builder cannot bleed one demo's frames into the other
+def test_chunk_actions_is_unclamped_mid_demo():
     n = ACTION_CHUNK + 3
-    ramp = torch.arange(2 * n, dtype=torch.float32).unsqueeze(1)
-    features = ramp.repeat(1, HIDDEN_DIM)
-    actions = ramp.repeat(1, ACTION_DIM)
-    demo_ids = torch.tensor([0] * n + [1] * n)
+    demo_actions = np.arange(n, dtype=np.float32).reshape(n, 1).repeat(ACTION_DIM, axis=1)
 
-    x, y, ids = build_history_chunks(features, actions, demo_ids)
-    assert x.shape == (2 * n, IN_DIM)
-    assert y.shape == (2 * n, ACTION_CHUNK, ACTION_DIM)
-    assert ids.tolist() == demo_ids.tolist()
+    chunk = _chunk_actions(demo_actions, 0, ACTION_CHUNK)
+    assert chunk.shape == (ACTION_CHUNK, ACTION_DIM)
+    assert chunk[:, 0].tolist() == [float(i) for i in range(ACTION_CHUNK)]
 
-    # t < ACTION_CHUNK clamps history to the demo's own first frame
-    assert x[0, 0] == 0.0 and x[0, HIDDEN_DIM] == 0.0
-    assert x[ACTION_CHUNK, 0] == 0.0 and x[ACTION_CHUNK, HIDDEN_DIM] == ACTION_CHUNK
-    # demo 1 starts over rather than reaching back into demo 0
-    assert x[n, 0] == float(n) and x[n, HIDDEN_DIM] == float(n)
 
-    # the last chunk repeats the demo's final action instead of running into demo 1
-    assert y[0, :, 0].tolist() == [float(i) for i in range(ACTION_CHUNK)]
-    assert y[n - 1, :, 0].tolist() == [float(n - 1)] * ACTION_CHUNK
+def test_chunk_actions_clamps_at_demo_end():
+    # the last chunk repeats the demo's final action instead of running past it
+    n = ACTION_CHUNK + 3
+    demo_actions = np.arange(n, dtype=np.float32).reshape(n, 1).repeat(ACTION_DIM, axis=1)
+
+    chunk = _chunk_actions(demo_actions, n - 1, ACTION_CHUNK)
+    assert chunk[:, 0].tolist() == [float(n - 1)] * ACTION_CHUNK
 
 
 def test_robomamba_src_exists():
