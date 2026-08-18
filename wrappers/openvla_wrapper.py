@@ -60,8 +60,6 @@ class OpenVlaWrapper(PolicyWrapper):
 
     def load(
         self, quant: str = "none", *, path: str | Path | None = None,
-        trunk_path: str | Path | None = None, 
-        head_path: str | Path | None = None,
         **kwargs: Any,
     ) -> None:
         """
@@ -71,20 +69,14 @@ class OpenVlaWrapper(PolicyWrapper):
             quant: quantization out of "none", "8bit", "4bit".
             path: HF Hub id or local path; overrides the checkpoint set in `__init__` when
                 given. None reuses the existing checkpoint.
-            trunk_path: Unsupported for OpenVLA.
-            head_path: Unsupported for OpenVLA.
             **kwargs: Unused; present for interface compatibility.
 
         Raises:
-            ValueError: if `quant` is unsupported, or `trunk_path`/`head_path` is given.
+            ValueError: if `quant` is unsupported.
         """
         if quant not in ("none", "8bit", "4bit"):
             raise ValueError(
                 f"Unsupported quant '{quant}'. Must be 'none', '8bit', or '4bit'."
-            )
-        if trunk_path is not None or head_path is not None:
-            raise ValueError(
-                "OpenVlaWrapper has no trunk/head split."
             )
         if path is not None:
             self._checkpoint = str(path)

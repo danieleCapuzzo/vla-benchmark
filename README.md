@@ -23,18 +23,21 @@ architecture — older/more common GPUs are more likely to find a matching wheel
 
 ### 0. Clone the sub-projects
 
-This repo doesn't vendor `mail`, `openvla`, `openvla-oft`, or `LIBERO` as submodules —
-clone each one into `external/` by hand before continuing (see `config/paths.py` for the
-exact expected layout):
+This repo doesn't vendor `mail`, `openvla`, `openvla-oft`, `LIBERO`, or `roboMamba-libero`
+as submodules — clone each one into `external/` by hand before continuing (see
+`config/paths.py` for the exact expected layout):
 
 ```bash
 mkdir -p external
 git clone git@github.com:ALRhub/MaIL.git external/mail
-git clone git@github.com:lmzpai/roboMamba.git external/robo_mamba
 git clone git@github.com:openvla/openvla.git external/openvla
 git clone git@github.com:moojink/openvla-oft.git external/openvla-oft
 git clone git@github.com:Lifelong-Robot-Learning/LIBERO.git external/LIBERO
+git clone --branch libero-port --single-branch git@github.com:danieleCapuzzo/roboMamba-libero.git external/roboMamba-libero
 ```
+
+RoboMamba training/fine-tuning lives entirely in `roboMamba-libero` (a separate project);
+this repo only loads the merged checkpoints it produces (see `doc/ROBOMAMBA.md`).
 
 ### 1. Create the environment
 
@@ -119,18 +122,8 @@ Then install the cloned sub-projects as editable installs:
 ```bash
 pip install -e ./external/openvla --no-deps
 pip install -e ./external/openvla-oft --no-deps
-pip install -e ./external/mail --no-deps
 ```
-
-`external/robo_mamba/` needs no install step: its `requirements.txt` pins are already satisfied
-by `bench-env` for everything it actually imports (see doc/ROBOMAMBA.md for the
-version-by-version check). Its modules (`model.vision`, `model.llm`, `model.vlm`) are imported
-directly off `sys.path` by `core/robomamba_arch.py`, the same pattern `core/mail_arch.py` uses
-for `external/mail/`.
-
-If you ever move the `external/` layout, both editable installs must be re-run — their finder
-modules (`site-packages/__editable___openvla*`) hardcode the absolute path they were installed
-from.
+*NOTE:* `external/roboMamba-libero/` and `external/mail/` do not need to be installed.
 
 Finally, install `libero` from PyPI, also with `--no-deps`:
 
@@ -141,6 +134,7 @@ pip install libero==0.1.1 --no-deps
 `--no-deps` avoids downgrading the `robomimic` version this project needs
 and conflicts with in a single resolve — see the comment in `pyproject.toml` next to
 the (deliberately absent) `libero` dependency. 
+
 ### 7. Verifying the install
 
 Run the dedicated environment check first — it isolates failures in torch/CUDA,
@@ -173,7 +167,7 @@ is auto-selected as `config/config_<model>.json` unless `--config` is given expl
 python run_eval.py --model oft --suite spatial --quant 8bit --rollouts 20
 python run_eval.py --model openvla --suite all --quant 8bit       # full benchmark
 python run_eval.py --model mail --suite goal --language           # language-conditioned MaIL
-python run_eval.py --model robomamba --suite spatial              # RoboMamba (frozen trunk + head)
+python run_eval.py --model robomamba --suite spatial              # RoboMamba (merged checkpoint)
 ```
 
 Key flags: 
@@ -207,19 +201,10 @@ Trains on 100% of demos per task by default, other important flags:
 - `--amp` (bf16 autocast),
 - `--output-dir` (default `trained/`).
 
-### Train RoboMamba
+### RoboMamba checkpoints
 
-`train_robomamba.py` trains a small LIBERO action head on top of RoboMamba's frozen
-CLIP+Mamba-2.8B trunk, on a single suite:
-
-```bash
-python train_robomamba.py --suite spatial
-python train_robomamba.py --suite long --num-demos 10
-```
-
-Everything except the head is frozen, so training runs in two stages: (1) one forward pass of
-the trunk over the suite, caching each frame's last-position hidden state to
-`trained/robomamba/<suite>/features_*.pt` (reused on subsequent runs unless `--force-extract`
-is passed); (2) AdamW + L1 loss training of the head on the cached features (seconds/epoch).
-Other flags: `--epochs`, `--batch-size` (stage 2), `--extract-batch-size` (stage 1, tune to fit
-your GPU), `--lr`, `--weight-decay`, `--seed`, `--trunk-checkpoint`, `--output-dir`.
+RoboMamba has no training entrypoint in this repo — fine-tuning happens in the separate
+`roboMamba-libero` project (`external/roboMamba-libero/`), which produces a single
+self-contained merged `.pt` per suite via its `merge_weights.py`. Copy that file into
+`trained/robomamba/<suite>/` and point `config/config_robomamba.json` at it; see
+`doc/ROBOMAMBA.md` for the checkpoint format and how it's loaded.

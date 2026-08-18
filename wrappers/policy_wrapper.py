@@ -73,8 +73,6 @@ class PolicyWrapper(ABC):
     @abstractmethod
     def load(
         self, quant: str = "none", *, path: str | Path | None = None,
-        trunk_path: str | Path | None = None,
-        head_path: str | Path | None = None,
         **kwargs: Any,
     ) -> None:
         """Loads model weights, with the requested quantization where applicable.
@@ -87,19 +85,11 @@ class PolicyWrapper(ABC):
             quant: Quantization mode, one of "none", "8bit", "4bit". Ignored by models
                 with no quantized loading path (MaIL, RoboMamba).
             path: Checkpoint path override. None reuses the checkpoint given in
-                `__init__`. For a combined trunk+head file, this is the only argument
-                needed.
-            trunk_path: Trunk-only override, for models that support loading trunk and
-                head from separate files (RoboMamba). None reuses the trunk referenced by
-                the checkpoint's own metadata, or `path` itself if this model has no
-                trunk/head split.
-            head_path: Head-only override, same split-loading support. None together with
-                `path=None` means "trunk only" for models that support it.
+                `__init__`.
             **kwargs: Model-specific extra loading parameters.
 
         Raises:
-            ValueError: If `trunk_path`/`head_path` are given for a model with no
-                trunk/head split, or if `quant` is unsupported.
+            ValueError: If `quant` is unsupported.
         """
 
     @abstractmethod

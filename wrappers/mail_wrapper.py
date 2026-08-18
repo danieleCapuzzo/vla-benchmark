@@ -55,8 +55,6 @@ class MailWrapper(PolicyWrapper):
     def load(
         self,
         quant: str = "none", *, path: str | Path | None = None,
-        trunk_path: str | Path | None = None,
-        head_path: str | Path | None = None,
         **kwargs: Any,
     ) -> None:
         """
@@ -65,19 +63,14 @@ class MailWrapper(PolicyWrapper):
             quant: Must be "none" as MaIL has no quantized loading path.
             path: Checkpoint path; overrides the checkpoint set in `__init__` when given.
                 None reuses the existing checkpoint.
-            trunk_path: Unsupported -- MaIL has no trunk/head split (obs_encoder and
-                diffusion head are trained end-to-end as one unit).
-            head_path: Unsupported, see `trunk_path`.
             **kwargs: Unused; present for interface compatibility.
         Raises:
-            ValueError: if `quant != "none"`, `trunk_path`/`head_path` is given, or the
-                checkpoint wasn't trained with the 2-camera (agentview + wrist)
-                configuration or the language-conditioning setting this wrapper requires.
+            ValueError: if `quant != "none"`, or the checkpoint wasn't trained with the
+                2-camera (agentview + wrist) configuration or the language-conditioning
+                setting this wrapper requires.
         """
         if quant != "none":
             raise ValueError(f"MaIL has no quantized loading path; got quant='{quant}'.")
-        if trunk_path is not None or head_path is not None:
-            raise ValueError("MailWrapper has no trunk/head split; pass `path` only.")
         if path is not None:
             self._checkpoint = str(path)
         self._quant = quant

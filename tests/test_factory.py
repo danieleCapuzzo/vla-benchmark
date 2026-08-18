@@ -10,7 +10,7 @@ class _DummyWrapper(PolicyWrapper):
     def __init__(self, **kwargs):
         self.kwargs = kwargs
 
-    def load(self, quant="none", *, path=None, trunk_path=None, head_path=None, **kwargs):
+    def load(self, quant="none", *, path=None, **kwargs):
         pass
 
     def reset(self):

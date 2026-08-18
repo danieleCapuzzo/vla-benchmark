@@ -219,9 +219,9 @@ def test_out_of_range_actions_saturate_at_the_boundary():
 
 
 def test_normalize_actions_accepts_cuda_tensors():
-    """train_robomamba.py calls normalize_actions with torch.quantile() outputs, which can be
-    CUDA tensors -- np.clip() would force a numpy round trip and crash on device tensors, so
-    normalize_actions must use the array's own .clip() method instead."""
+    """Some callers pass torch.quantile() outputs, which can be CUDA tensors -- np.clip() would
+    force a numpy round trip and crash on device tensors, so normalize_actions must use the
+    array's own .clip() method instead."""
     torch = pytest.importorskip("torch")
     if not torch.cuda.is_available():
         pytest.skip("no CUDA device available")

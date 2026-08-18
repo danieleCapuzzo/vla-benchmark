@@ -6,7 +6,7 @@
   "output_dir": "results",
   "suites": {
     "spatial": {
-      "checkpoint": "trained/robomamba/spatial/best.pt",
+      "checkpoint": "trained/robomamba/spatial/spatial_epoch16_bf16.pt",
       "unnorm_key": "",
       "task_suite_name": "libero_spatial"
     },

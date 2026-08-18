@@ -247,6 +247,8 @@ def run_one_suite(
     model_kwargs: Dict[str, Any] = {}
     if model == "mail":
         model_kwargs["language"] = language
+    if model == "robomamba":
+        model_kwargs["suite"] = suite
     wrapper = PolicyFactory.create(
         model,
         checkpoint=suite_cfg.checkpoint,
@@ -330,8 +332,8 @@ def main() -> None:
     # warn of different num rollouts than expected
     if rollouts != FROZEN_ROLLOUTS_PER_TASK:
         print(
-            f"WARNING: --rollouts {rollouts} deviates from the frozen protocol value "
-            f"({FROZEN_ROLLOUTS_PER_TASK}/task, see doc/ARCHITECTURE.md). "
+            f"WARNING: --rollouts {rollouts} deviates from the ideal value "
+            f"({FROZEN_ROLLOUTS_PER_TASK}/task). "
             "Use only for smoke tests, not for reported results."
         )
 
