@@ -168,47 +168,81 @@ def test_normalize_gripper_action_binarize_false_keeps_continuous_values():
 
 
 # ------------------------------------------------------------------ action normalization
+# bounds_q99: same scheme as OpenVLA-OFT's BOUNDS_Q99 -- per-dim [q01, q99] mapped to [-1, 1].
 
 
 def test_action_normalization_round_trips():
-    actions = np.random.default_rng(0).normal(size=(64, ACTION_DIM)).astype(np.float32)
-    mean, std = actions.mean(0), actions.std(0)
-    restored = denormalize_actions(normalize_actions(actions, mean, std), mean, std)
-    np.testing.assert_allclose(restored, actions, rtol=1e-5, atol=1e-6)
+    actions = np.random.default_rng(0).uniform(-1, 1, size=(64, ACTION_DIM)).astype(np.float32)
+    q01, q99 = np.quantile(actions, 0.01, axis=0), np.quantile(actions, 0.99, axis=0)
+    restored = denormalize_actions(normalize_actions(actions, q01, q99), q01, q99)
+    # points inside [q01, q99] round-trip exactly; the 1% tails saturate at +/-1 and don't.
+    inside = np.all((actions >= q01) & (actions <= q99), axis=-1)
+    np.testing.assert_allclose(restored[inside], actions[inside], rtol=1e-4, atol=1e-5)
 
 
-def test_action_normalization_equalizes_dim_scales():
-    """The point of normalizing: LIBERO's rotation dims are ~10x smaller than xyz, so raw
-    targets let xyz/gripper dominate an unweighted L1 loss and the rotation dims go
-    effectively unlearned."""
+def test_action_normalization_maps_bounds_to_unit_range():
+    """The point of bounds normalization: LIBERO's rotation dims are ~10x smaller than xyz, so
+    raw targets let xyz/gripper dominate an unweighted L1 loss and the rotation dims go
+    effectively unlearned. Mapping each dim's [q01, q99] to [-1, 1] equalizes their scales."""
     scales = np.array([0.42, 0.35, 0.51, 0.038, 0.072, 0.058, 1.0], dtype=np.float32)
     actions = np.random.default_rng(0).normal(size=(4096, ACTION_DIM)).astype(np.float32) * scales
-    mean, std = actions.mean(0), actions.std(0)
+    q01, q99 = np.quantile(actions, 0.01, axis=0), np.quantile(actions, 0.99, axis=0)
 
-    assert actions.std(0).max() / actions.std(0).min() > 10  # the problem
+    assert (q99 - q01).max() / (q99 - q01).min() > 10  # the problem
+    normalized = normalize_actions(actions, q01, q99)
+    assert normalized.min() >= -1.0 - 1e-4 and normalized.max() <= 1.0 + 1e-4  # the fix
     np.testing.assert_allclose(
-        normalize_actions(actions, mean, std).std(0), np.ones(ACTION_DIM), rtol=1e-4
-    )  # the fix
+        np.quantile(normalized, 0.01, axis=0), -np.ones(ACTION_DIM), atol=1e-2
+    )
+    np.testing.assert_allclose(
+        np.quantile(normalized, 0.99, axis=0), np.ones(ACTION_DIM), atol=1e-2
+    )
 
 
-def test_identity_stats_are_a_noop():
-    """--raw-actions passes mean=0/std=1; that path must not alter the targets."""
-    actions = np.random.default_rng(0).normal(size=(16, ACTION_DIM)).astype(np.float32)
-    zero, one = np.zeros(ACTION_DIM, np.float32), np.ones(ACTION_DIM, np.float32)
-    np.testing.assert_allclose(normalize_actions(actions, zero, one), actions)
-    np.testing.assert_allclose(denormalize_actions(actions, zero, one), actions)
+def test_identity_bounds_are_a_noop():
+    """q01=-1/q99=1 (e.g. for checkpoints without stored action stats) must not alter targets
+    already in [-1, 1]."""
+    actions = np.random.default_rng(0).uniform(-1, 1, size=(16, ACTION_DIM)).astype(np.float32)
+    q01, q99 = -np.ones(ACTION_DIM, np.float32), np.ones(ACTION_DIM, np.float32)
+    np.testing.assert_allclose(normalize_actions(actions, q01, q99), actions, atol=1e-6)
+    np.testing.assert_allclose(denormalize_actions(actions, q01, q99), actions, atol=1e-6)
+
+
+def test_out_of_range_actions_saturate_at_the_boundary():
+    """Actions outside [q01, q99] (the 1% tails) clip to +/-1 rather than exceeding it --
+    matches OpenVLA-OFT's tf.clip_by_value behavior."""
+    q01, q99 = np.zeros(ACTION_DIM, np.float32), np.ones(ACTION_DIM, np.float32)
+    beyond_high = np.full(ACTION_DIM, 5.0, dtype=np.float32)
+    beyond_low = np.full(ACTION_DIM, -5.0, dtype=np.float32)
+    np.testing.assert_allclose(normalize_actions(beyond_high, q01, q99), 1.0)
+    np.testing.assert_allclose(normalize_actions(beyond_low, q01, q99), -1.0)
+
+
+def test_normalize_actions_accepts_cuda_tensors():
+    """Some callers pass torch.quantile() outputs, which can be CUDA tensors -- np.clip() would
+    force a numpy round trip and crash on device tensors, so normalize_actions must use the
+    array's own .clip() method instead."""
+    torch = pytest.importorskip("torch")
+    if not torch.cuda.is_available():
+        pytest.skip("no CUDA device available")
+    actions = torch.full((4, ACTION_DIM), 5.0, device="cuda")
+    q01 = torch.zeros(ACTION_DIM, device="cuda")
+    q99 = torch.ones(ACTION_DIM, device="cuda")
+    result = normalize_actions(actions, q01, q99)
+    assert result.is_cuda
+    torch.testing.assert_close(result, torch.ones_like(result))
 
 
 def test_denormalize_then_gripper_remap_is_the_documented_order():
     """core_utils documents denormalize -> env_gripper_to_rlds. The remap assumes a raw-unit
     gripper, so doing it before denormalization gives a different (wrong) command."""
-    mean = np.array([0.0] * 6 + [0.1], dtype=np.float32)
-    std = np.array([1.0] * 6 + [0.9], dtype=np.float32)
-    predicted = np.array([0.0] * 6 + [-1.0], dtype=np.float32)  # standardized units
+    q01 = np.array([0.0] * 6 + [-1.0], dtype=np.float32)
+    q99 = np.array([1.0] * 6 + [0.8], dtype=np.float32)
+    predicted = np.array([0.0] * 6 + [-1.0], dtype=np.float32)  # bounds-normalized units
 
-    correct = env_gripper_to_rlds(denormalize_actions(predicted, mean, std))
-    wrong = denormalize_actions(env_gripper_to_rlds(predicted), mean, std)
+    correct = env_gripper_to_rlds(denormalize_actions(predicted, q01, q99))
+    wrong = denormalize_actions(env_gripper_to_rlds(predicted), q01, q99)
     assert correct[-1] != pytest.approx(wrong[-1])
-    # raw gripper is 0.1 + 0.9*(-1) = -0.8 (open) -> RLDS 0.9, and stays "open" after the chain
-    assert correct[-1] == pytest.approx(0.9)
+    # raw gripper is q01 (predicted=-1 maps to the low bound) = -1.0 (open) -> RLDS 1.0
+    assert correct[-1] == pytest.approx(1.0)
     assert np.sign(invert_gripper_action(normalize_gripper_action(correct))[-1]) == -1.0

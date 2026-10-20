@@ -1,0 +1,29 @@
+{
+  "rollouts_per_task": 20,
+  "quant": "none",
+  "seed": 7,
+  "num_steps_wait": 10,
+  "output_dir": "results",
+  "suites": {
+    "spatial": {
+      "checkpoint": "trained/robomamba/spatial/lora_epoch21.pt",
+      "unnorm_key": "",
+      "task_suite_name": "libero_spatial"
+    },
+    "object": {
+      "checkpoint": "trained/robomamba/object/lora_epoch30.pt",
+      "unnorm_key": "",
+      "task_suite_name": "libero_object"
+    },
+    "goal": {
+      "checkpoint": "trained/robomamba/goal/lora_epoch30.pt",
+      "unnorm_key": "",
+      "task_suite_name": "libero_goal"
+    },
+    "long": {
+      "checkpoint": "trained/robomamba/long/lora_epoch26.pt",
+      "unnorm_key": "",
+      "task_suite_name": "libero_10"
+    }
+  }
+}

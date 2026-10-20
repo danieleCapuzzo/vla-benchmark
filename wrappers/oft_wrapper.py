@@ -49,7 +49,7 @@ if str(_OFT_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_OFT_REPO_ROOT))
 
 from core.factory import PolicyFactory  # noqa: E402
-from core.policy_wrapper import PolicyMetadata, PolicyOutput, PolicyWrapper  # noqa: E402
+from wrappers.policy_wrapper import PolicyMetadata, PolicyOutput, PolicyWrapper  # noqa: E402
 from experiments.robot.libero.run_libero_eval import GenerateConfig  # noqa: E402
 from experiments.robot.openvla_utils import (  # noqa: E402
     get_action_head,
@@ -61,8 +61,6 @@ from experiments.robot.openvla_utils import (  # noqa: E402
 )
 from prismatic.vla.constants import NUM_ACTIONS_CHUNK, PROPRIO_DIM  # noqa: E402
 
-# OFT uses agentview + wrist.
-NUM_CAMERAS = NUM_CAMERAS_BY_MODEL["oft"]
 
 @PolicyFactory.register("oft")
 class OftWrapper(PolicyWrapper):
@@ -88,21 +86,26 @@ class OftWrapper(PolicyWrapper):
         self._proprio_projector = None
         self._quant = "none"
 
-    def load(self, quant: str = "none", **kwargs: Any) -> None:
+    def load(
+        self, quant: str = "none", *, path: str | Path | None = None,
+        **kwargs: Any,
+    ) -> None:
         """
         Loads the OFT checkpoint via the official pipeline.
-
         Args:
             quant: quantization out of "none", "8bit", "4bit".
+            path: HF Hub id or local path; overrides the checkpoint set in `__init__` when
+                given. None reuses the existing checkpoint.
             **kwargs: Unused; present for interface compatibility.
-
         Raises:
-            ValueError: if `quant` is not one of the supported values.
+            ValueError: if `quant` is unsupported.
         """
         if quant not in ("none", "8bit", "4bit"):
             raise ValueError(
                 f"Unsupported quant '{quant}'. Must be 'none', '8bit', or '4bit'."
             )
+        if path is not None:
+            self._checkpoint = str(path)
 
         # ensure the correct transformers fork is installed
         _assert_transformers_fork_installed()
@@ -119,7 +122,7 @@ class OftWrapper(PolicyWrapper):
             use_l1_regression=True,
             use_diffusion=False,
             use_film=False,
-            num_images_in_input=NUM_CAMERAS,
+            num_images_in_input=NUM_CAMERAS_BY_MODEL["oft"],
             use_proprio=True,
             load_in_8bit=(quant == "8bit"),
             load_in_4bit=(quant == "4bit"),
@@ -142,9 +145,7 @@ class OftWrapper(PolicyWrapper):
         """
         No-op: the OFT wrapper is stateless between calls.
         The action-chunk queue (open-loop execution of the K=8 chunk between requeries) is
-        owned by the evaluator's rollout loop, not by this wrapper, since it is a
-        control-loop concern shared by any chunked model. Implemented to satisfy the
-        PolicyWrapper contract.
+        owned by the evaluator's rollout loop, not by this wrapper.
         """
 
     def predict(
@@ -156,13 +157,11 @@ class OftWrapper(PolicyWrapper):
         Resize-to-224 (model-specific preprocessing) happens here, excluded from the timed
         region. Only the `get_vla_action` call itself is timed, bracketed by
         `torch.cuda.synchronize()` per doc/ARCHITECTURE.md §5.2 / CLAUDE.md timing rules.
-
         Args:
             observation: Dict with keys "full_image" (H,W,3 uint8), optionally
                 "wrist_image", and "state" (proprioception), at LIBERO env resolution
                 (NOT yet resized for the policy).
             task_description: natural-language task instruction.
-
         Returns:
             PolicyOutput with actions of shape (NUM_ACTIONS_CHUNK, ACTION_DIM), is_chunked=True,
             and the model-only latency in seconds.
@@ -208,12 +207,12 @@ class OftWrapper(PolicyWrapper):
             variant=self._checkpoint,
             num_params=num_params,
             quant=self._quant,
-            num_cameras=NUM_CAMERAS,
+            num_cameras=NUM_CAMERAS_BY_MODEL["oft"],
             action_chunk_size=self._num_actions_chunk,
             attn_impl="sdpa",
             extra={
                 "unnorm_key": self._unnorm_key,
-                "num_images_in_input": NUM_CAMERAS,
+                "num_images_in_input": NUM_CAMERAS_BY_MODEL["oft"],
             },
         )
 

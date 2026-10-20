@@ -30,16 +30,19 @@ NUM_CAMERAS_BY_MODEL = {
     "openvla": 1,
     "oft": 2,
     "mail": 2,
+    "robomamba": 1,
 }
 
-# Render resolution each model was trained on. OpenVLA/OFT were trained on 256px re-rendered
-# frames; MaIL was trained on the native-128 LIBERO hdf5 demos and should be evaluated at the
-# same resolution (upstream: mail/simulation/benchmark_sim.py camera_heights/widths=128).
+# Render resolution each model was trained on. OpenVLA/OFT/RoboMamba train on 256px re-rendered
+# frames (datasets/libero_*_regen); MaIL was trained on the native-128 LIBERO hdf5 demos and
+# should be evaluated at the same resolution (upstream: mail/simulation/benchmark_sim.py
+# camera_heights/widths=128).
 DEFAULT_RENDER_RESOLUTION = 256
 RENDER_RESOLUTION_BY_MODEL = {
     "openvla": 256,
     "oft": 256,
     "mail": 128,
+    "robomamba": 256,
 }
 
 # Final input resolution to the OpenVLA-family vision backbones (both openvla and oft resize
@@ -48,3 +51,6 @@ OPENVLA_INPUT_RESOLUTION = 224
 
 # MaIL's native training/eval resolution (see mail_wrapper.py and core/mail_arch.py).
 MAIL_IMAGE_SIZE = 128
+
+# RoboMamba's CLIP ViT-L/14@224 backbone, fed from the 256px regenerated renders.
+ROBOMAMBA_IMAGE_SIZE = OPENVLA_INPUT_RESOLUTION

@@ -79,6 +79,7 @@ _WRAPPER_MODULE_BY_MODEL = {
     "openvla": "wrappers.openvla_wrapper",
     "oft": "wrappers.oft_wrapper",
     "mail": "wrappers.mail_wrapper",
+    "robomamba": "wrappers.robomamba_wrapper",
 }
 from results_io.results import (  # noqa: E402
     write_all_suites_csv,
@@ -94,6 +95,7 @@ _DEFAULT_CONFIG_BY_MODEL = {
     "openvla": "config_openvla.json",
     "oft": "config_oft.json",
     "mail": "config_mail.json",
+    "robomamba": "config_robomamba.json",
 }
 
 
@@ -107,7 +109,7 @@ def parse_args() -> argparse.Namespace:
     Parses keyboard arguments
     """
     parser = argparse.ArgumentParser(description="VLA-on-LIBERO testbench CLI")
-    parser.add_argument("--model", required=True, choices=["openvla", "oft", "mail"])
+    parser.add_argument("--model", required=True, choices=["openvla", "oft", "mail", "robomamba"])
     parser.add_argument(
         "--suite",
         required=True,
@@ -245,6 +247,8 @@ def run_one_suite(
     model_kwargs: Dict[str, Any] = {}
     if model == "mail":
         model_kwargs["language"] = language
+    if model == "robomamba":
+        model_kwargs["suite"] = suite
     wrapper = PolicyFactory.create(
         model,
         checkpoint=suite_cfg.checkpoint,
@@ -328,8 +332,8 @@ def main() -> None:
     # warn of different num rollouts than expected
     if rollouts != FROZEN_ROLLOUTS_PER_TASK:
         print(
-            f"WARNING: --rollouts {rollouts} deviates from the frozen protocol value "
-            f"({FROZEN_ROLLOUTS_PER_TASK}/task, see doc/ARCHITECTURE.md). "
+            f"WARNING: --rollouts {rollouts} deviates from the ideal value "
+            f"({FROZEN_ROLLOUTS_PER_TASK}/task). "
             "Use only for smoke tests, not for reported results."
         )
 

@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from core.policy_wrapper import PolicyMetadata
+from wrappers.policy_wrapper import PolicyMetadata
 from results_io.results import (
     SUMMARY_CSV_FIELDS,
     write_all_suites_csv,
